@@ -278,10 +278,27 @@ jobs:
           HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
           HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
         run: |
+          set -eu
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           port="${HOSTINGER_SSH_PORT:-22}"
-          ssh-keyscan -p "$port" -H "$HOSTINGER_SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # reject non-numeric ports up front (common secret mix-up)
+          if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+            echo "HOSTINGER_SSH_PORT is not a number (got length ${#port} — check the secret value)"
+            exit 1
+          fi
+          echo "scanning $HOSTINGER_SSH_HOST:$port ..."
+          # keep stderr visible so network errors are diagnosable
+          if ! ssh-keyscan -T 10 -p "$port" -H "$HOSTINGER_SSH_HOST" >> ~/.ssh/known_hosts; then
+            echo "ssh-keyscan failed — the VPS is unreachable on port $port from GitHub's runners."
+            echo "Check: (1) host value, (2) port value, (3) firewall rules on the VPS / Hostinger panel."
+            exit 1
+          fi
+          if ! [[ -s ~/.ssh/known_hosts ]]; then
+            echo "ssh-keyscan produced no output — VPS did not respond on port $port"
+            exit 1
+          fi
+          echo "host key pinned ($(wc -l < ~/.ssh/known_hosts) entries)"
 
       - name: Sync compose file + deploy script to VPS
         env:
