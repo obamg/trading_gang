@@ -1,0 +1,163 @@
+# TradeCore — zero-config development stack.
+#
+# Boot the entire platform (Postgres + Redis + API + Scheduler + Frontend)
+# with one command:
+#
+#     docker compose up --build
+#
+# Then browse to http://localhost:8080 and log in with:
+#     test@tradecore.local / test1234   (or demo@tradecore.local / demo1234)
+#
+# A one-shot `seed` service creates the accounts on first boot. Migrations run
+# automatically via the entrypoint.
+#
+# For production, see docker-compose.prod.yml (uses real secrets, no exposed
+# ports besides 80, different resource limits).
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tradecore_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradecore
+      POSTGRES_PASSWORD: tradecore
+      POSTGRES_DB: tradecore
+    ports:
+      - "5432:5432"
+    volumes:
+      - tradecore_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradecore -d tradecore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [tradecore]
+
+  redis:
+    image: redis:7-alpine
+    container_name: tradecore_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - tradecore_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [tradecore]
+
+  # One-shot: runs `alembic upgrade head` then `python -m app.scripts.seed_dev`.
+  # Exits 0 once migrations + accounts exist. Idempotent — safe to rerun.
+  seed:
+    build:
+      context: ./tradecore
+      dockerfile: Dockerfile
+    container_name: tradecore_seed
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://tradecore:tradecore@postgres:5432/tradecore
+      DATABASE_URL_SYNC: postgresql+psycopg2://tradecore:tradecore@postgres:5432/tradecore
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_STORAGE_URL: redis://redis:6379/1
+      APP_SECRET_KEY: dev-secret-key-not-for-production
+      JWT_SECRET: dev-jwt-secret-not-for-production
+      RUN_MIGRATIONS: "1"
+      RUN_SEED: "1"
+    # Override CMD with a no-op; entrypoint does the migration + seed then exits.
+    command: ["true"]
+    restart: "no"
+    networks: [tradecore]
+
+  api:
+    build:
+      context: ./tradecore
+      dockerfile: Dockerfile
+    container_name: tradecore_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://tradecore:tradecore@postgres:5432/tradecore
+      DATABASE_URL_SYNC: postgresql+psycopg2://tradecore:tradecore@postgres:5432/tradecore
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_STORAGE_URL: redis://redis:6379/1
+      APP_SECRET_KEY: dev-secret-key-not-for-production
+      JWT_SECRET: dev-jwt-secret-not-for-production
+      FRONTEND_URL: http://localhost:8080
+      # Scheduler runs in its own container
+      SCHEDULER_ENABLED: "false"
+      # Turn Binance streams off by default — flip to "true" for live candles
+      BINANCE_STREAMS_ENABLED: "false"
+      # Migrations already ran in the `seed` service; don't re-run here
+      RUN_MIGRATIONS: "0"
+      RUN_SEED: "0"
+    ports:
+      - "8000:8000"
+    networks: [tradecore]
+
+  scheduler:
+    build:
+      context: ./tradecore
+      dockerfile: Dockerfile
+    container_name: tradecore_scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://tradecore:tradecore@postgres:5432/tradecore
+      DATABASE_URL_SYNC: postgresql+psycopg2://tradecore:tradecore@postgres:5432/tradecore
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_STORAGE_URL: redis://redis:6379/1
+      APP_SECRET_KEY: dev-secret-key-not-for-production
+      JWT_SECRET: dev-jwt-secret-not-for-production
+      SCHEDULER_ENABLED: "true"
+      BINANCE_STREAMS_ENABLED: "false"
+      RUN_MIGRATIONS: "0"
+      RUN_SEED: "0"
+    command: ["python", "-m", "app.services.scheduler_standalone"]
+    # Headless — no HTTP server, so the image's curl-based healthcheck would always fail.
+    healthcheck:
+      disable: true
+    networks: [tradecore]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+        VITE_WS_URL: /ws
+    container_name: tradecore_frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+    networks: [tradecore]
+
+volumes:
+  tradecore_pg_data:
+  tradecore_redis_data:
+
+networks:
+  tradecore:
+    driver: bridge

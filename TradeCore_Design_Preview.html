@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeCore — Design System Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-canvas: #070C18;
+    --bg-primary: #0B1120;
+    --bg-secondary: #111827;
+    --bg-card: #1A2235;
+    --bg-elevated: #1F2D42;
+    --bg-hover: #243350;
+    --primary: #3B82F6;
+    --primary-hover: #60A5FA;
+    --primary-active: #2563EB;
+    --primary-subtle: #1E3A5F;
+    --primary-glow: rgba(59,130,246,0.15);
+    --profit: #10B981;
+    --profit-subtle: #064E3B;
+    --loss: #EF4444;
+    --loss-subtle: #450A0A;
+    --warning: #F59E0B;
+    --warning-subtle: #451A03;
+    --text-primary: #F1F5F9;
+    --text-secondary: #94A3B8;
+    --text-muted: #64748B;
+    --border-subtle: #1E293B;
+    --border-default: #334155;
+    --border-strong: #475569;
+    --radarx: #3B82F6;
+    --whaleradar: #06B6D4;
+    --liquidmap: #F97316;
+    --sentimentpulse: #A855F7;
+    --macropulse: #6366F1;
+    --gemradar: #10B981;
+    --riskcalc: #EAB308;
+    --tradelog: #94A3B8;
+    --performancecore: #14B8A6;
+    --oracle: #8B5CF6;
+    --font-ui: 'Inter', sans-serif;
+    --font-data: 'JetBrains Mono', monospace;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  /* ── LAYOUT ── */
+  .app {
+    display: grid;
+    grid-template-rows: 48px 1fr;
+    grid-template-columns: 240px 1fr;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* TOP BAR */
+  .topbar {
+    grid-column: 1 / -1;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 24px;
+    z-index: 100;
+  }
+
+  .logo {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 160px;
+  }
+
+  .logo-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 8px var(--primary);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.3); }
+  }
+
+  .macro-strip {
+    display: flex;
+    gap: 20px;
+    flex: 1;
+  }
+
+  .macro-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .macro-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  .macro-value {
+    font-family: var(--font-data);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-left: auto;
+  }
+
+  .balance-display {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+  }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--primary-subtle);
+    border: 2px solid var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--primary);
+  }
+
+  .notif-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+    font-size: 16px;
+  }
+
+  .notif-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 16px;
+    height: 16px;
+    background: var(--loss);
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--bg-secondary);
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+
+  .sidebar-section {
+    padding: 8px 12px 4px;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border-left: 3px solid transparent;
+    margin: 1px 0;
+  }
+
+  .nav-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .nav-item.active {
+    background: var(--primary-subtle);
+    border-left-color: var(--primary);
+    color: var(--text-primary);
+  }
+
+  .nav-item.active .nav-icon {
+    color: var(--primary);
+  }
+
+  .nav-icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+
+  .module-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .nav-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    flex: 1;
+  }
+
+  .nav-item.active .nav-label {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .nav-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--loss);
+    color: white;
+  }
+
+  .sidebar-bottom {
+    margin-top: auto;
+    border-top: 1px solid var(--border-subtle);
+    padding: 12px 0;
+  }
+
+  /* MAIN CONTENT */
+  .main {
+    background: var(--bg-primary);
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* PAGE HEADER */
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .page-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .module-badge {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+  h2 { font-size: 16px; font-weight: 600; }
+  h3 { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* CARDS */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .card-body { padding: 20px; }
+
+  .card-alert {
+    border-left: 3px solid var(--radarx);
+  }
+
+  /* METRIC CARDS */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
+  .metric-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+  }
+
+  .metric-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .metric-value {
+    font-family: var(--font-data);
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .metric-change {
+    font-family: var(--font-data);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* PROFIT / LOSS COLORS */
+  .profit { color: var(--profit); }
+  .loss { color: var(--loss); }
+  .warning { color: var(--warning); }
+  .muted { color: var(--text-muted); }
+  .secondary { color: var(--text-secondary); }
+
+  /* ALERT FEED */
+  .alert-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-subtle);
+    border-left: 3px solid transparent;
+    transition: background 0.15s;
+    cursor: pointer;
+  }
+
+  .alert-item:hover { background: var(--bg-hover); }
+  .alert-item.unread { background: rgba(59,130,246,0.04); }
+  .alert-item:last-child { border-bottom: none; }
+
+  .alert-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .alert-symbol {
+    font-family: var(--font-data);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .alert-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+    font-family: var(--font-data);
+  }
+
+  .alert-stats {
+    display: flex;
+    gap: 16px;
+  }
+
+  .alert-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .alert-stat-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .alert-stat-value {
+    font-family: var(--font-data);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* TABLE */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .data-table th {
+    text-align: left;
+    padding: 10px 16px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-secondary);
+  }
+
+  .data-table th.num { text-align: right; }
+
+  .data-table td {
+    padding: 12px 16px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background 0.1s;
+  }
+
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tbody tr:hover td { background: var(--bg-hover); }
+
+  .data-table td.num {
+    text-align: right;
+    font-family: var(--font-data);
+    font-weight: 500;
+  }
+
+  /* BADGES */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .badge-bullish { background: var(--profit-subtle); color: var(--profit); }
+  .badge-bearish { background: var(--loss-subtle); color: var(--loss); }
+  .badge-warning { background: var(--warning-subtle); color: var(--warning); }
+  .badge-neutral { background: var(--bg-elevated); color: var(--text-muted); }
+  .badge-new { background: var(--primary-subtle); color: var(--primary); }
+
+  /* BUTTONS */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: none;
+    font-family: var(--font-ui);
+  }
+
+  .btn-primary {
+    background: var(--primary);
+    color: white;
+  }
+  .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
+
+  .btn-secondary {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+  }
+  .btn-secondary:hover { background: var(--bg-hover); }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+  }
+  .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  .btn-danger { background: var(--loss); color: white; }
+  .btn-danger:hover { opacity: 0.85; }
+
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* ORACLE SCORE */
+  .oracle-card {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 24px;
+    align-items: center;
+  }
+
+  .oracle-score-ring {
+    position: relative;
+    width: 140px;
+    height: 140px;
+  }
+
+  .oracle-score-ring svg { transform: rotate(-90deg); }
+
+  .oracle-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .oracle-number {
+    font-family: var(--font-data);
+    font-size: 36px;
+    font-weight: 800;
+    color: var(--profit);
+    line-height: 1;
+  }
+
+  .oracle-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .oracle-details {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .oracle-rec {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--profit);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .module-signals {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .module-signal-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .signal-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .signal-name {
+    font-size: 12px;
+    color: var(--text-secondary);
+    width: 120px;
+    flex-shrink: 0;
+  }
+
+  .signal-bar-track {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-elevated);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .signal-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.6s ease-out;
+  }
+
+  .signal-dir {
+    font-size: 11px;
+    font-weight: 600;
+    width: 50px;
+    text-align: right;
+    font-family: var(--font-data);
+  }
+
+  /* LIVE INDICATOR */
+  .live-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--profit);
+    font-weight: 600;
+  }
+
+  .live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--profit);
+    animation: pulse 2s infinite;
+  }
+
+  /* SECTION HEADER */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  /* GRID LAYOUTS */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+  /* CHART PLACEHOLDER */
+  .chart-placeholder {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .chart-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 100px;
+    padding: 0 20px;
+  }
+
+  .chart-bar {
+    width: 12px;
+    border-radius: 2px 2px 0 0;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+  }
+
+  .chart-bar:hover { opacity: 1; }
+
+  /* RISK CALC WIDGET */
+  .risk-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .risk-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .risk-input-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 600;
+  }
+
+  .risk-input {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    color: var(--text-primary);
+    font-family: var(--font-data);
+    font-size: 13px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .risk-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-glow);
+  }
+
+  .risk-result {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .risk-result-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .risk-result-label { font-size: 12px; color: var(--text-muted); }
+  .risk-result-value { font-family: var(--font-data); font-size: 13px; font-weight: 600; }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+  ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+  /* DIVIDER */
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 4px 0;
+  }
+
+  /* TAGS */
+  .tag {
+    display: inline-flex;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+  }
+
+  /* TRADE LOG ROW */
+  .trade-side {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+  }
+
+  .trade-long { background: rgba(16,185,129,0.15); color: var(--profit); }
+  .trade-short { background: rgba(239,68,68,0.15); color: var(--loss); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="logo">
+      <div class="logo-dot"></div>
+      TradeCore
+    </div>
+
+    <div class="macro-strip">
+      <div class="macro-item">
+        <span class="macro-label">DXY</span>
+        <span class="macro-value loss">104.31 ▲</span>
+      </div>
+      <div class="macro-item">
+        <span class="macro-label">US10Y</span>
+        <span class="macro-value loss">4.71% ▲</span>
+      </div>
+      <div class="macro-item">
+        <span class="macro-label">VIX</span>
+        <span class="macro-value profit">18.2 ▼</span>
+      </div>
+      <div class="macro-item">
+        <span class="macro-label">S&P 500</span>
+        <span class="macro-value profit">5,241 ▲</span>
+      </div>
+      <div class="macro-item">
+        <span class="macro-label">BTC ETF Flow</span>
+        <span class="macro-value profit">+$312M</span>
+      </div>
+      <div class="macro-item">
+        <span class="macro-label">Fear & Greed</span>
+        <span class="macro-value warning">64 – Greed</span>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="balance-display">
+        <span class="macro-label">Account</span>
+        <span class="macro-value profit" style="font-size:14px;">$24,830.50</span>
+      </div>
+      <div class="notif-btn">🔔<span class="notif-badge">3</span></div>
+      <div class="avatar">M</div>
+    </div>
+  </header>
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-section">Detection</div>
+
+    <div class="nav-item active">
+      <div class="module-dot" style="background:var(--radarx)"></div>
+      <span class="nav-label">RadarX</span>
+      <span class="nav-badge">5</span>
+    </div>
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--whaleradar)"></div>
+      <span class="nav-label">WhaleRadar</span>
+      <span class="nav-badge">2</span>
+    </div>
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--liquidmap)"></div>
+      <span class="nav-label">LiquidMap</span>
+    </div>
+
+    <div class="sidebar-section" style="margin-top:8px;">Analysis</div>
+
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--sentimentpulse)"></div>
+      <span class="nav-label">SentimentPulse</span>
+    </div>
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--macropulse)"></div>
+      <span class="nav-label">MacroPulse</span>
+    </div>
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--gemradar)"></div>
+      <span class="nav-label">GemRadar</span>
+    </div>
+
+    <div class="sidebar-section" style="margin-top:8px;">Execution</div>
+
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--riskcalc)"></div>
+      <span class="nav-label">RiskCalc</span>
+    </div>
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--tradelog)"></div>
+      <span class="nav-label">TradeLog</span>
+    </div>
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--performancecore)"></div>
+      <span class="nav-label">PerformanceCore</span>
+    </div>
+
+    <div class="sidebar-section" style="margin-top:8px;">Intelligence</div>
+
+    <div class="nav-item">
+      <div class="module-dot" style="background:var(--oracle);box-shadow:0 0 6px var(--oracle)"></div>
+      <span class="nav-label" style="color:var(--oracle);font-weight:600;">Oracle</span>
+    </div>
+
+    <div class="sidebar-bottom">
+      <div class="divider"></div>
+      <div class="nav-item" style="margin-top:4px;">
+        <span style="font-size:16px;">⚙️</span>
+        <span class="nav-label">Settings</span>
+      </div>
+      <div class="nav-item">
+        <span style="font-size:16px;">💳</span>
+        <span class="nav-label">Billing</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main class="main">
+
+    <!-- PAGE HEADER -->
+    <div class="page-header">
+      <div class="page-title">
+        <div class="module-badge" style="background:rgba(59,130,246,0.15);">📡</div>
+        <div>
+          <h1>RadarX</h1>
+          <span style="font-size:13px;color:var(--text-muted);">Volume spike detection — Binance USDT-M Perpetuals</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <div class="live-indicator"><div class="live-dot"></div>LIVE</div>
+        <button class="btn btn-secondary btn-sm">⚙ Settings</button>
+        <button class="btn btn-primary btn-sm">+ Add to Watchlist</button>
+      </div>
+    </div>
+
+    <!-- METRIC CARDS -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Alerts Today</div>
+        <div class="metric-value" style="color:var(--primary);">47</div>
+        <div class="metric-change"><span class="profit">↑ 12</span><span class="muted">vs yesterday</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Avg Z-Score</div>
+        <div class="metric-value profit">4.21</div>
+        <div class="metric-change muted">last 24 hours</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Top Symbol</div>
+        <div class="metric-value" style="font-family:var(--font-data);font-size:20px;">SOLUSDT</div>
+        <div class="metric-change"><span class="profit">+6.82%</span><span class="muted">last alert</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Signal Accuracy</div>
+        <div class="metric-value profit">68.4%</div>
+        <div class="metric-change muted">correct @ 1h (4d avg)</div>
+      </div>
+    </div>
+
+    <!-- MAIN CONTENT GRID -->
+    <div class="grid-2" style="grid-template-columns:1fr 380px;">
+
+      <!-- ALERT FEED -->
+      <div class="card">
+        <div class="card-header">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <h2>Alert Feed</h2>
+            <span class="badge badge-new">5 new</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost btn-sm">All</button>
+            <button class="btn btn-secondary btn-sm">Watchlist</button>
+          </div>
+        </div>
+
+        <!-- Alert items -->
+        <div class="alert-item unread" style="border-left-color:var(--radarx);">
+          <div class="alert-header">
+            <span style="color:var(--radarx);font-size:14px;">📡</span>
+            <span class="alert-symbol">SOLUSDT</span>
+            <span class="badge badge-bullish">Bullish</span>
+            <span class="badge badge-new">NEW</span>
+            <span class="alert-time">09:45 UTC</span>
+          </div>
+          <div class="alert-stats">
+            <div class="alert-stat">
+              <span class="alert-stat-label">Z-Score</span>
+              <span class="alert-stat-value profit">5.21</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">Ratio</span>
+              <span class="alert-stat-value profit">7.4×</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">Volume (5m)</span>
+              <span class="alert-stat-value">$24.1M</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">Price Δ</span>
+              <span class="alert-stat-value profit">+2.31%</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            <button class="btn btn-secondary btn-sm">📊 Chart</button>
+            <button class="btn btn-primary btn-sm">Open in RiskCalc →</button>
+          </div>
+        </div>
+
+        <div class="alert-item unread" style="border-left-color:var(--whaleradar);">
+          <div class="alert-header">
+            <span style="color:var(--whaleradar);font-size:14px;">🐋</span>
+            <span class="alert-symbol">ETHUSDT</span>
+            <span class="badge badge-bullish">Whale Buy</span>
+            <span class="badge badge-new">NEW</span>
+            <span class="alert-time">09:42 UTC</span>
+          </div>
+          <div class="alert-stats">
+            <div class="alert-stat">
+              <span class="alert-stat-label">Trade Size</span>
+              <span class="alert-stat-value profit">$1.82M</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">OI Change</span>
+              <span class="alert-stat-value profit">+8.4%</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">CVD</span>
+              <span class="alert-stat-value profit">+Strong</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert-item" style="border-left-color:var(--gemradar);">
+          <div class="alert-header">
+            <span style="color:var(--gemradar);font-size:14px;">💎</span>
+            <span class="alert-symbol">PEPEUSDT</span>
+            <span class="badge badge-warning">Med Risk</span>
+            <span class="alert-time">09:31 UTC</span>
+          </div>
+          <div class="alert-stats">
+            <div class="alert-stat">
+              <span class="alert-stat-label">Price Δ (8m)</span>
+              <span class="alert-stat-value profit">+23.4%</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">Vol/MCap</span>
+              <span class="alert-stat-value warning">34×</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">MCap</span>
+              <span class="alert-stat-value">$8.2M</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert-item" style="border-left-color:var(--radarx);">
+          <div class="alert-header">
+            <span style="color:var(--radarx);font-size:14px;">📡</span>
+            <span class="alert-symbol">BTCUSDT</span>
+            <span class="badge badge-bearish">Bearish</span>
+            <span class="alert-time">09:20 UTC</span>
+          </div>
+          <div class="alert-stats">
+            <div class="alert-stat">
+              <span class="alert-stat-label">Z-Score</span>
+              <span class="alert-stat-value loss">3.84</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">Ratio</span>
+              <span class="alert-stat-value loss">4.9×</span>
+            </div>
+            <div class="alert-stat">
+              <span class="alert-stat-label">Price Δ</span>
+              <span class="alert-stat-value loss">−1.12%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT PANEL: Oracle + RiskCalc -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+
+        <!-- Oracle Card -->
+        <div class="card" style="border-color:rgba(139,92,246,0.3);">
+          <div class="card-header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="color:var(--oracle);">🔮</span>
+              <h2 style="color:var(--oracle);">Oracle</h2>
+            </div>
+            <span class="badge" style="background:rgba(139,92,246,0.15);color:var(--oracle);">SOLUSDT</span>
+          </div>
+          <div class="card-body">
+            <div class="oracle-card">
+              <div class="oracle-score-ring">
+                <svg width="140" height="140" viewBox="0 0 140 140">
+                  <circle cx="70" cy="70" r="58" fill="none" stroke="#1E293B" stroke-width="10"/>
+                  <circle cx="70" cy="70" r="58" fill="none" stroke="#10B981" stroke-width="10"
+                    stroke-dasharray="364" stroke-dashoffset="87" stroke-linecap="round"/>
+                </svg>
+                <div class="oracle-center">
+                  <span class="oracle-number">76</span>
+                  <span class="oracle-label">Score</span>
+                </div>
+              </div>
+              <div class="oracle-details">
+                <div class="oracle-rec">🟢 Strong Long</div>
+                <div style="font-size:12px;color:var(--text-muted);">5 of 6 modules agree</div>
+                <div class="module-signals">
+                  <div class="module-signal-row">
+                    <div class="signal-dot" style="background:var(--macropulse)"></div>
+                    <span class="signal-name">MacroPulse</span>
+                    <div class="signal-bar-track"><div class="signal-bar-fill" style="width:80%;background:var(--profit)"></div></div>
+                    <span class="signal-dir profit">+Bull</span>
+                  </div>
+                  <div class="module-signal-row">
+                    <div class="signal-dot" style="background:var(--whaleradar)"></div>
+                    <span class="signal-name">WhaleRadar</span>
+                    <div class="signal-bar-track"><div class="signal-bar-fill" style="width:90%;background:var(--profit)"></div></div>
+                    <span class="signal-dir profit">+Bull</span>
+                  </div>
+                  <div class="module-signal-row">
+                    <div class="signal-dot" style="background:var(--radarx)"></div>
+                    <span class="signal-name">RadarX</span>
+                    <div class="signal-bar-track"><div class="signal-bar-fill" style="width:70%;background:var(--profit)"></div></div>
+                    <span class="signal-dir profit">+Bull</span>
+                  </div>
+                  <div class="module-signal-row">
+                    <div class="signal-dot" style="background:var(--liquidmap)"></div>
+                    <span class="signal-name">LiquidMap</span>
+                    <div class="signal-bar-track"><div class="signal-bar-fill" style="width:60%;background:var(--profit)"></div></div>
+                    <span class="signal-dir profit">+Bull</span>
+                  </div>
+                  <div class="module-signal-row">
+                    <div class="signal-dot" style="background:var(--sentimentpulse)"></div>
+                    <span class="signal-name">SentimentPulse</span>
+                    <div class="signal-bar-track"><div class="signal-bar-fill" style="width:50%;background:var(--profit)"></div></div>
+                    <span class="signal-dir profit">+Bull</span>
+                  </div>
+                  <div class="module-signal-row">
+                    <div class="signal-dot" style="background:var(--gemradar)"></div>
+                    <span class="signal-name">GemRadar</span>
+                    <div class="signal-bar-track"><div class="signal-bar-fill" style="width:30%;background:var(--text-muted)"></div></div>
+                    <span class="signal-dir muted">Neutral</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RiskCalc Card -->
+        <div class="card">
+          <div class="card-header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="color:var(--riskcalc);">🛡</span>
+              <h2>RiskCalc</h2>
+            </div>
+            <span class="badge badge-new">SOLUSDT</span>
+          </div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:12px;">
+            <div class="risk-grid">
+              <div class="risk-input-group">
+                <label class="risk-input-label">Entry Price</label>
+                <input class="risk-input" type="text" value="$142.40">
+              </div>
+              <div class="risk-input-group">
+                <label class="risk-input-label">Stop Loss</label>
+                <input class="risk-input" type="text" value="$138.20" style="border-color:var(--loss);">
+              </div>
+              <div class="risk-input-group">
+                <label class="risk-input-label">Take Profit</label>
+                <input class="risk-input" type="text" value="$153.60" style="border-color:var(--profit);">
+              </div>
+              <div class="risk-input-group">
+                <label class="risk-input-label">Risk %</label>
+                <input class="risk-input" type="text" value="1.0%">
+              </div>
+            </div>
+            <div class="risk-result">
+              <div class="risk-result-row">
+                <span class="risk-result-label">Position Size</span>
+                <span class="risk-result-value">14.2 SOL</span>
+              </div>
+              <div class="risk-result-row">
+                <span class="risk-result-label">Leverage</span>
+                <span class="risk-result-value warning">3×</span>
+              </div>
+              <div class="risk-result-row">
+                <span class="risk-result-label">Max Loss</span>
+                <span class="risk-result-value loss">−$248.30</span>
+              </div>
+              <div class="risk-result-row">
+                <span class="risk-result-label">Potential Profit</span>
+                <span class="risk-result-value profit">+$638.24</span>
+              </div>
+              <div class="risk-result-row">
+                <span class="risk-result-label">R:R Ratio</span>
+                <span class="risk-result-value profit">2.57×  ✓</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-secondary" style="flex:1;font-size:12px;">📄 Paper Trade</button>
+              <button class="btn btn-primary" style="flex:1;font-size:12px;">Execute Trade →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOP MOVERS TABLE -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Top Movers — Live Z-Score Ranking</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span class="live-indicator"><div class="live-dot"></div>LIVE</span>
+          <button class="btn btn-ghost btn-sm">Futures</button>
+          <button class="btn btn-ghost btn-sm">Spot</button>
+        </div>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Symbol</th>
+            <th>Price</th>
+            <th class="num">Z-Score</th>
+            <th class="num">Ratio</th>
+            <th class="num">Vol (5m)</th>
+            <th class="num">Price Δ</th>
+            <th class="num">Funding</th>
+            <th>Signal</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color:var(--text-muted);font-family:var(--font-data);">1</td>
+            <td><strong style="font-family:var(--font-data);">SOLUSDT</strong></td>
+            <td class="num">$142.40</td>
+            <td class="num profit"><strong>5.21</strong></td>
+            <td class="num profit">7.4×</td>
+            <td class="num">$24.1M</td>
+            <td class="num profit">+2.31%</td>
+            <td class="num profit">+0.012%</td>
+            <td><span class="badge badge-bullish">Strong Long</span></td>
+            <td><button class="btn btn-secondary btn-sm">→</button></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted);font-family:var(--font-data);">2</td>
+            <td><strong style="font-family:var(--font-data);">ETHUSDT</strong></td>
+            <td class="num">$3,241.80</td>
+            <td class="num profit"><strong>4.18</strong></td>
+            <td class="num profit">5.9×</td>
+            <td class="num">$41.2M</td>
+            <td class="num profit">+1.82%</td>
+            <td class="num profit">+0.008%</td>
+            <td><span class="badge badge-bullish">Long</span></td>
+            <td><button class="btn btn-secondary btn-sm">→</button></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted);font-family:var(--font-data);">3</td>
+            <td><strong style="font-family:var(--font-data);">BTCUSDT</strong></td>
+            <td class="num">$83,420.00</td>
+            <td class="num loss"><strong>3.84</strong></td>
+            <td class="num loss">4.9×</td>
+            <td class="num">$186.4M</td>
+            <td class="num loss">−1.12%</td>
+            <td class="num loss">−0.003%</td>
+            <td><span class="badge badge-bearish">Short</span></td>
+            <td><button class="btn btn-secondary btn-sm">→</button></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted);font-family:var(--font-data);">4</td>
+            <td><strong style="font-family:var(--font-data);">AVAXUSDT</strong></td>
+            <td class="num">$38.74</td>
+            <td class="num profit"><strong>3.41</strong></td>
+            <td class="num profit">4.2×</td>
+            <td class="num">$8.7M</td>
+            <td class="num profit">+0.94%</td>
+            <td class="num profit">+0.006%</td>
+            <td><span class="badge badge-neutral">Neutral</span></td>
+            <td><button class="btn btn-secondary btn-sm">→</button></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted);font-family:var(--font-data);">5</td>
+            <td><strong style="font-family:var(--font-data);">SUIUSDT</strong></td>
+            <td class="num">$1.284</td>
+            <td class="num warning"><strong>3.12</strong></td>
+            <td class="num warning">4.1×</td>
+            <td class="num">$3.2M</td>
+            <td class="num profit">+1.41%</td>
+            <td class="num profit">+0.021%</td>
+            <td><span class="badge badge-bullish">Watch</span></td>
+            <td><button class="btn btn-secondary btn-sm">→</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,142 @@
+# TradeCore production stack — run with:
+#   docker-compose -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# Assumes .env.production is populated from .env.production.example.
+# The SSL termination step (public facing) is expected to happen at a layer in
+# front of this stack (e.g. a load balancer or a second nginx with certbot).
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tradecore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradecore}
+      POSTGRES_DB: ${POSTGRES_DB:-tradecore}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tradecore}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradecore
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradecore
+
+  api:
+    build:
+      context: ./tradecore
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC}
+      REDIS_URL: ${REDIS_URL}
+      RATE_LIMIT_STORAGE_URL: ${RATE_LIMIT_STORAGE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      FRONTEND_URL: ${FRONTEND_URL}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      STRIPE_PRO_PRICE_ID_MONTHLY: ${STRIPE_PRO_PRICE_ID_MONTHLY}
+      STRIPE_PRO_PRICE_ID_YEARLY: ${STRIPE_PRO_PRICE_ID_YEARLY}
+      STRIPE_ELITE_PRICE_ID_MONTHLY: ${STRIPE_ELITE_PRICE_ID_MONTHLY}
+      STRIPE_ELITE_PRICE_ID_YEARLY: ${STRIPE_ELITE_PRICE_ID_YEARLY}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-false}
+      WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY}
+      COINGLASS_API_KEY: ${COINGLASS_API_KEY}
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY}
+      TRADING_ECONOMICS_API_KEY: ${TRADING_ECONOMICS_API_KEY}
+      BINANCE_STREAMS_ENABLED: ${BINANCE_STREAMS_ENABLED:-true}
+      SCHEDULER_ENABLED: "false"  # Scheduler runs in its own container
+      # API container owns the migration — single writer, no contention.
+      RUN_MIGRATIONS: "1"
+      RUN_SEED: "0"
+    networks:
+      - tradecore
+
+  scheduler:
+    build:
+      context: ./tradecore
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC}
+      REDIS_URL: ${REDIS_URL}
+      RATE_LIMIT_STORAGE_URL: ${RATE_LIMIT_STORAGE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      FRONTEND_URL: ${FRONTEND_URL}
+      BINANCE_STREAMS_ENABLED: "false"
+      SCHEDULER_ENABLED: "true"
+      WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY}
+      COINGLASS_API_KEY: ${COINGLASS_API_KEY}
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY}
+      TRADING_ECONOMICS_API_KEY: ${TRADING_ECONOMICS_API_KEY}
+      # Migrations are owned by the api container; scheduler must not race them.
+      RUN_MIGRATIONS: "0"
+      RUN_SEED: "0"
+    # Same image, but headless — run the scheduler via a small entry script.
+    command: ["python", "-m", "app.services.scheduler_standalone"]
+    # No HTTP server → curl-based image healthcheck would always fail.
+    healthcheck:
+      disable: true
+    networks:
+      - tradecore
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+        VITE_WS_URL: /ws
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+    networks:
+      - tradecore
+
+volumes:
+  pg_data:
+  redis_data:
+
+networks:
+  tradecore:
+    driver: bridge

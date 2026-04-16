@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tradecore_postgres
+    environment:
+      POSTGRES_USER: tradecore
+      POSTGRES_PASSWORD: tradecore
+      POSTGRES_DB: tradecore
+    ports:
+      - "5432:5432"
+    volumes:
+      - tradecore_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradecore"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tradecore_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - tradecore_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  tradecore_pg_data:
+  tradecore_redis_data:
