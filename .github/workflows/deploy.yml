@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      force_full_deploy:
+        description: "Rebuild and redeploy every service, ignoring change detection"
+        required: false
+        default: "false"
 
 env:
   REGISTRY: ghcr.io
@@ -13,8 +18,50 @@ env:
   IMAGE_FRONTEND: ${{ github.repository }}/frontend
 
 jobs:
+  # ----------------------------------------------------------------------
+  # Change detection — decides which services need a rebuild + redeploy.
+  # Map of source paths to service groups:
+  #   tradecore/**          → api (also rebuilds scheduler, same image)
+  #   frontend/**           → frontend
+  #   docker-compose.prod.yml
+  #     scripts/deploy-remote.sh
+  #     .github/workflows/deploy.yml  → infra: redeploy everything
+  # ----------------------------------------------------------------------
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      infra: ${{ steps.filter.outputs.infra }}
+      force: ${{ github.event.inputs.force_full_deploy == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'tradecore/**'
+            frontend:
+              - 'frontend/**'
+            infra:
+              - 'docker-compose.prod.yml'
+              - 'scripts/deploy-remote.sh'
+              - '.github/workflows/deploy.yml'
+
+  # ----------------------------------------------------------------------
+  # Tests only run when the relevant tree changed (or on manual dispatch).
+  # ----------------------------------------------------------------------
   backend-tests:
     name: Backend tests
+    needs: changes
+    if: >-
+      needs.changes.outputs.api == 'true' ||
+      needs.changes.outputs.infra == 'true' ||
+      needs.changes.outputs.force == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -33,7 +80,6 @@ jobs:
         options: >-
           --health-cmd="redis-cli ping"
           --health-interval=10s --health-timeout=5s --health-retries=5
-
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,14 +87,12 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: tradecore/requirements.txt
-
       - name: Install deps
         working-directory: tradecore
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx aiosqlite
-
       - name: Run tests
         working-directory: tradecore
         env:
@@ -64,6 +108,11 @@ jobs:
 
   frontend-tests:
     name: Frontend tests & build
+    needs: changes
+    if: >-
+      needs.changes.outputs.frontend == 'true' ||
+      needs.changes.outputs.infra == 'true' ||
+      needs.changes.outputs.force == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,27 +121,31 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
       - name: Install deps
         working-directory: frontend
-        run: npm ci --no-audit --no-fund
-
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck
-
       - name: Unit tests
         working-directory: frontend
         run: npm test -- --run
-
       - name: Production build
         working-directory: frontend
         run: npm run build
 
-  build-and-push:
-    name: Build & push images
-    needs: [backend-tests, frontend-tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # ----------------------------------------------------------------------
+  # Build only the images whose source changed (or both, if infra changed).
+  # Each build job is gated by its own `if:` so unchanged images don't rebuild.
+  # ----------------------------------------------------------------------
+  build-api:
+    name: Build & push API image
+    needs: [changes, backend-tests]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      (needs.changes.outputs.api == 'true' ||
+       needs.changes.outputs.infra == 'true' ||
+       needs.changes.outputs.force == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -100,27 +153,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push API image
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: ./tradecore
           push: true
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_API }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_API }}:${{ github.sha }}
 
-      - name: Build & push frontend image
-        uses: docker/build-push-action@v6
+  build-frontend:
+    name: Build & push frontend image
+    needs: [changes, frontend-tests]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      (needs.changes.outputs.frontend == 'true' ||
+       needs.changes.outputs.infra == 'true' ||
+       needs.changes.outputs.force == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
         with:
           context: ./frontend
           push: true
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
           build-args: |
             VITE_API_URL=/api
             VITE_WS_URL=/ws
@@ -128,15 +201,118 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_FRONTEND }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_FRONTEND }}:${{ github.sha }}
 
+  # ----------------------------------------------------------------------
+  # Deploy to Hostinger VPS — SSH in, sync the compose file, run the
+  # selective deploy script. Restarts only the changed services.
+  # ----------------------------------------------------------------------
   deploy:
-    name: Deploy to production
-    needs: build-and-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Deploy to Hostinger VPS
+    needs: [changes, build-api, build-frontend]
+    # `always()` so this runs even if one of the build jobs was skipped
+    # because nothing in its tree changed. We then filter inside: if a
+    # build that *should* have run actually failed, abort.
+    if: >-
+      always() &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      (needs.changes.outputs.api == 'true' ||
+       needs.changes.outputs.frontend == 'true' ||
+       needs.changes.outputs.infra == 'true' ||
+       needs.changes.outputs.force == 'true') &&
+      needs.build-api.result != 'failure' &&
+      needs.build-frontend.result != 'failure'
     runs-on: ubuntu-latest
     environment: production
+    concurrency:
+      # Never two deploys at once to the same box.
+      group: hostinger-prod
+      cancel-in-progress: false
     steps:
-      - name: Trigger deploy
+      - uses: actions/checkout@v4
+
+      - name: Compute deploy scope
+        id: scope
+        env:
+          API_CHANGED: ${{ needs.changes.outputs.api }}
+          FRONTEND_CHANGED: ${{ needs.changes.outputs.frontend }}
+          INFRA_CHANGED: ${{ needs.changes.outputs.infra }}
+          FORCE: ${{ needs.changes.outputs.force }}
         run: |
-          echo "Images pushed — wire this step to your deploy mechanism:"
-          echo "  ssh host 'cd /opt/tradecore && docker compose pull && docker compose up -d'"
-          echo "Or call a webhook / kubectl / terraform here."
+          set -eu
+          services=""
+          if [[ "$INFRA_CHANGED" == "true" || "$FORCE" == "true" ]]; then
+            services="postgres redis api scheduler frontend"
+          else
+            [[ "$API_CHANGED" == "true" ]] && services="$services api scheduler"
+            [[ "$FRONTEND_CHANGED" == "true" ]] && services="$services frontend"
+          fi
+          services="$(echo "$services" | xargs)"  # trim
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          echo "deploying services: [$services]"
+
+      - name: Install SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HOSTINGER_SSH_KEY }}
+
+      - name: Trust VPS host key
+        env:
+          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          port="${HOSTINGER_SSH_PORT:-22}"
+          ssh-keyscan -p "$port" -H "$HOSTINGER_SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync compose file + deploy script to VPS
+        env:
+          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          HOSTINGER_SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          DEPLOY_DIR: ${{ secrets.HOSTINGER_DEPLOY_DIR }}
+        run: |
+          set -eu
+          port="${HOSTINGER_SSH_PORT:-22}"
+          deploy_dir="${DEPLOY_DIR:-/opt/tradecore}"
+          scp -P "$port" \
+            docker-compose.prod.yml \
+            scripts/deploy-remote.sh \
+            "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST:$deploy_dir/"
+          ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
+            "chmod +x $deploy_dir/deploy-remote.sh"
+
+      - name: Run selective deploy on VPS
+        env:
+          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          HOSTINGER_SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          DEPLOY_DIR: ${{ secrets.HOSTINGER_DEPLOY_DIR }}
+          SERVICES: ${{ steps.scope.outputs.services }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          port="${HOSTINGER_SSH_PORT:-22}"
+          deploy_dir="${DEPLOY_DIR:-/opt/tradecore}"
+          ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
+            "cd $deploy_dir && DEPLOY_DIR=$deploy_dir ./deploy-remote.sh $SHA $SHA $SERVICES"
+
+      - name: Health probe
+        env:
+          HEALTH_URL: ${{ secrets.HOSTINGER_HEALTH_URL }}
+        run: |
+          set -eu
+          url="${HEALTH_URL:-}"
+          if [[ -z "$url" ]]; then
+            echo "HOSTINGER_HEALTH_URL not set — skipping post-deploy probe"
+            exit 0
+          fi
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "$url" >/dev/null; then
+              echo "health check ok ($url)"
+              exit 0
+            fi
+            echo "attempt $i failed, retrying..."
+            sleep 5
+          done
+          echo "health check FAILED after 6 attempts"
+          exit 1

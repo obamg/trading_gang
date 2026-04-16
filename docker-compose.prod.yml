@@ -4,6 +4,11 @@
 # Assumes .env.production is populated from .env.production.example.
 # The SSL termination step (public facing) is expected to happen at a layer in
 # front of this stack (e.g. a load balancer or a second nginx with certbot).
+#
+# Image tags are driven by env vars so CI can pin a specific git sha:
+#   API_IMAGE_TAG=abc1234 FRONTEND_IMAGE_TAG=abc1234 docker compose ... up -d
+# Defaults to `:latest` if not set. `build:` blocks are kept so the file remains
+# buildable locally via `docker compose -f docker-compose.prod.yml build`.
 
 services:
   postgres:
@@ -38,6 +43,7 @@ services:
       - tradecore
 
   api:
+    image: ghcr.io/${GITHUB_REPOSITORY:-obamg/trading_gang}/api:${API_IMAGE_TAG:-latest}
     build:
       context: ./tradecore
       dockerfile: Dockerfile
@@ -82,6 +88,8 @@ services:
       - tradecore
 
   scheduler:
+    # Same image as the API — a single build is tagged once and reused.
+    image: ghcr.io/${GITHUB_REPOSITORY:-obamg/trading_gang}/api:${API_IMAGE_TAG:-latest}
     build:
       context: ./tradecore
       dockerfile: Dockerfile
@@ -119,6 +127,7 @@ services:
       - tradecore
 
   frontend:
+    image: ghcr.io/${GITHUB_REPOSITORY:-obamg/trading_gang}/frontend:${FRONTEND_IMAGE_TAG:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile
