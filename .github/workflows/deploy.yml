@@ -249,6 +249,25 @@ jobs:
           echo "services=$services" >> "$GITHUB_OUTPUT"
           echo "deploying services: [$services]"
 
+      - name: Verify required secrets are set
+        env:
+          HOSTINGER_SSH_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          HOSTINGER_SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+        run: |
+          set -eu
+          missing=""
+          [[ -z "${HOSTINGER_SSH_KEY:-}" ]] && missing="$missing HOSTINGER_SSH_KEY"
+          [[ -z "${HOSTINGER_SSH_HOST:-}" ]] && missing="$missing HOSTINGER_SSH_HOST"
+          [[ -z "${HOSTINGER_SSH_USER:-}" ]] && missing="$missing HOSTINGER_SSH_USER"
+          if [[ -n "$missing" ]]; then
+            echo "Missing required secrets on the 'production' environment:$missing"
+            echo "Configure at: Settings → Environments → production → Environment secrets"
+            exit 1
+          fi
+          echo "ssh key length: ${#HOSTINGER_SSH_KEY} bytes"
+          echo "host: $HOSTINGER_SSH_HOST   user: $HOSTINGER_SSH_USER"
+
       - name: Install SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
