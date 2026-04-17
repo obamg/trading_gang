@@ -40,9 +40,25 @@ class Settings(BaseSettings):
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
 
     # Email
-    sendgrid_api_key: str = ""
+    # Provider: "sendgrid" | "smtp" | "" (empty = dev stub, just logs).
+    # When empty but sendgrid_api_key is set, falls back to "sendgrid" for
+    # backwards compatibility with older deployments.
+    email_provider: str = ""
     email_from_address: str = "no-reply@tradecore.local"
     email_from_name: str = "TradeCore"
+    # SendGrid
+    sendgrid_api_key: str = ""
+    # Generic SMTP (works with Gmail, Fastmail, Mailgun SMTP, self-hosted Postfix, etc.)
+    # Gmail preset:
+    #   SMTP_HOST=smtp.gmail.com  SMTP_PORT=587  SMTP_USE_TLS=true
+    #   SMTP_USER=<your-gmail-address>
+    #   SMTP_PASSWORD=<16-char App Password>   # NOT your real Google password
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True      # STARTTLS on non-465 ports; ignored when port=465 (implicit SMTPS)
+    smtp_timeout_seconds: int = 10
 
     # Binance
     binance_base_url: str = "wss://fstream.binance.com"
