@@ -146,11 +146,19 @@ services:
     restart: unless-stopped
     depends_on:
       - api
-    # Loopback-only publish. The public TLS edge is the host's toxal-nginx
-    # container, which reverse-proxies https://formationdouane.online to
-    # http://<toxal_toxal_gateway_ip>:8090. Never expose this port publicly.
+    # Private publish on the toxal_toxal docker bridge gateway (172.18.0.1).
+    # That IP lives only on the host's docker bridge interface — not routable
+    # from the public internet — but is reachable from the toxal-nginx
+    # container, which terminates TLS for https://formationdouane.online and
+    # reverse-proxies here. Do NOT change to 0.0.0.0 or a public IP.
+    #
+    # If the toxal_toxal bridge ever gets recreated and picks a different
+    # gateway IP, update this value and the proxy_pass in
+    # deploy/nginx/formationdouane.online.conf to match. Check with:
+    #   docker network inspect toxal_toxal --format \
+    #     '{{(index .IPAM.Config 0).Gateway}}'
     ports:
-      - "127.0.0.1:8090:80"
+      - "172.18.0.1:8090:80"
     networks:
       - tradecore
 
