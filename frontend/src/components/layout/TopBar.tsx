@@ -18,13 +18,12 @@ function MacroMetric({ label, value, decimals = 2, suffix }: { label: string; va
 export function TopBar() {
   const metrics = useMacroStore((s) => s.metrics);
   const user = useAuthStore((s) => s.user);
-  const refresh = useAuthStore((s) => s.refreshToken);
   const clear = useAuthStore((s) => s.clear);
   const wsStatus = useWebSocketStore((s) => s.status);
 
   async function logout() {
     try {
-      if (refresh) await apiLogout(refresh);
+      await apiLogout();
     } catch {
       // swallow
     } finally {

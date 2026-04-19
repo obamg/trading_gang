@@ -5,7 +5,7 @@
 #
 #     docker compose up --build
 #
-# Then browse to http://localhost:8080 and log in with:
+# Then browse to http://localhost:${FRONTEND_PORT:-8081} and log in with:
 #     test@tradecore.local / test1234   (or demo@tradecore.local / demo1234)
 #
 # A one-shot `seed` service creates the accounts on first boot. Migrations run
@@ -96,11 +96,11 @@ services:
       RATE_LIMIT_STORAGE_URL: redis://redis:6379/1
       APP_SECRET_KEY: dev-secret-key-not-for-production
       JWT_SECRET: dev-jwt-secret-not-for-production
-      FRONTEND_URL: http://localhost:8080
+      FRONTEND_URL: http://localhost:${FRONTEND_PORT:-8081}
       # Scheduler runs in its own container
       SCHEDULER_ENABLED: "false"
       # Turn Binance streams off by default — flip to "true" for live candles
-      BINANCE_STREAMS_ENABLED: "false"
+      BINANCE_STREAMS_ENABLED: "true"
       # Migrations already ran in the `seed` service; don't re-run here
       RUN_MIGRATIONS: "0"
       RUN_SEED: "0"
@@ -151,7 +151,7 @@ services:
     depends_on:
       - api
     ports:
-      - "8080:80"
+      - "${FRONTEND_PORT:-8081}:80"
     networks: [tradecore]
 
 volumes:

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.oracle import OracleOutcome, OracleSignal
+from app.models.gemradar import GemRadarAlert
 from app.models.radarx import RadarXAlert
 from app.models.sentiment import SentimentSnapshot
 from app.models.whaleradar import OISurgeEvent, WhaleTrade
@@ -225,11 +226,39 @@ async def _macro_signal() -> dict:
     }
 
 
-def _gemradar_signal(symbol: str) -> dict:
+async def _gemradar_signal(db: AsyncSession, symbol: str) -> dict:
     # Small-caps only; majors return zero-intensity.
     if symbol.upper() in MAJOR_SYMBOLS:
         return {"direction": "neutral", "intensity": 0.0, "detail": None}
-    return {"direction": "neutral", "intensity": 0.0, "detail": None}
+
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    row = (
+        await db.execute(
+            select(GemRadarAlert)
+            .where(GemRadarAlert.symbol == symbol, GemRadarAlert.detected_at >= since)
+            .order_by(desc(GemRadarAlert.detected_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return {"direction": "neutral", "intensity": 0.0, "detail": None}
+
+    price_change = float(row.price_change_pct or 0)
+    direction = "bullish" if price_change > 0 else ("bearish" if price_change < 0 else "neutral")
+    # Intensity: inverse of risk score (low risk = high confidence) combined with volume
+    risk_numeric = row.risk_score_numeric or 50
+    risk_factor = _clip01(1.0 - risk_numeric / 100.0)
+    vol_factor = _clip01(float(row.volume_mcap_ratio or 0) / 0.5)
+    intensity = _clip01((risk_factor + vol_factor) / 2.0)
+    return {
+        "direction": direction,
+        "intensity": round(intensity, 3),
+        "detail": {
+            "price_change_pct": price_change,
+            "risk_score": row.risk_score,
+            "volume_mcap_ratio": float(row.volume_mcap_ratio) if row.volume_mcap_ratio else None,
+        },
+    }
 
 
 # ---------- scoring ----------
@@ -298,7 +327,7 @@ async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None
     }
     sent = await _sentiment_signal(db, sym)
     macro = await _macro_signal()
-    gem = _gemradar_signal(sym)
+    gem = await _gemradar_signal(db, sym)
 
     modules = {
         "radarx": radarx,
@@ -309,17 +338,23 @@ async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None
         "gemradar": gem,
     }
 
+    # Normalize weights so they always sum to 100, preventing score compression
+    # when modules are inactive or user-configured weights don't sum to 100.
+    raw_weight_sum = sum(float(weights.get(name, 0)) for name in modules)
+    weight_scale = 100.0 / raw_weight_sum if raw_weight_sum > 0 else 0.0
+
     breakdown: dict[str, dict] = {}
     total_score = 0.0
     confluence = 0
     for name, sig in modules.items():
         dir_val = {"bullish": 1, "bearish": -1}.get(sig["direction"], 0)
-        weight = float(weights.get(name, 0))
-        contribution = dir_val * float(sig["intensity"]) * weight
+        raw_weight = float(weights.get(name, 0))
+        normalized_weight = raw_weight * weight_scale
+        contribution = dir_val * float(sig["intensity"]) * normalized_weight
         breakdown[name] = {
             "direction": sig["direction"],
             "intensity": sig["intensity"],
-            "weight": weight,
+            "weight": round(normalized_weight, 2),
             "contribution": round(contribution, 2),
             "detail": sig.get("detail"),
         }
@@ -494,25 +529,42 @@ async def measure_outcomes() -> int:
         for sig, out in rows:
             age = now - sig.signal_at
             price_at_signal = float(out.price_at_signal)
-            latest = await redis_service.get_latest_candle(sig.symbol)
-            price_now = float(latest.get("close", 0)) if latest else 0.0
-            if price_now <= 0 or price_at_signal <= 0:
+            if price_at_signal <= 0:
                 continue
             changed = False
 
-            def _maybe(slot: str, min_minutes: int):
+            async def _maybe(slot: str, min_minutes: int) -> None:
                 nonlocal changed
-                if getattr(out, slot) is None and age >= timedelta(minutes=min_minutes):
-                    setattr(out, slot, Decimal(str(price_now)))
-                    pct = (price_now - price_at_signal) / price_at_signal * 100
-                    pnl_slot = slot.replace("price_", "pnl_") + "_pct"
-                    setattr(out, pnl_slot, Decimal(str(round(pct, 4))))
-                    changed = True
+                if getattr(out, slot) is not None or age < timedelta(minutes=min_minutes):
+                    return
+                # Try to find the candle at the exact target time
+                target_time = sig.signal_at + timedelta(minutes=min_minutes)
+                target_ts_ms = int(target_time.timestamp() * 1000)
+                candle = await redis_service.get_candle_at(
+                    sig.symbol, target_ts_ms, tolerance_ms=300_000,
+                )
+                if candle is None:
+                    # Fall back to latest only if the target time has passed
+                    # and we're within a reasonable window (< 2x the interval)
+                    if age <= timedelta(minutes=min_minutes * 2):
+                        latest = await redis_service.get_latest_candle(sig.symbol)
+                        if latest:
+                            candle = latest
+                if candle is None:
+                    return
+                price = float(candle.get("close", 0))
+                if price <= 0:
+                    return
+                setattr(out, slot, Decimal(str(price)))
+                pct = (price - price_at_signal) / price_at_signal * 100
+                pnl_slot = slot.replace("price_", "pnl_") + "_pct"
+                setattr(out, pnl_slot, Decimal(str(round(pct, 4))))
+                changed = True
 
-            _maybe("price_15m", 15)
-            _maybe("price_1h", 60)
-            _maybe("price_4h", 240)
-            _maybe("price_24h", 24 * 60)
+            await _maybe("price_15m", 15)
+            await _maybe("price_1h", 60)
+            await _maybe("price_4h", 240)
+            await _maybe("price_24h", 24 * 60)
 
             # Correctness checks — only when we just filled the slot
             if out.price_1h is not None and out.was_correct_1h is None:

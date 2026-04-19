@@ -1,8 +1,14 @@
 import { http } from "./client";
-import type { LoginPayload, RegisterPayload, TokenResponse, User } from "@/types/auth";
+import type { LoginPayload, RegisterPayload, User } from "@/types/auth";
 
-export async function apiLogin(payload: LoginPayload): Promise<TokenResponse> {
-  const { data } = await http.post<TokenResponse>("/auth/login", payload);
+interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export async function apiLogin(payload: LoginPayload): Promise<LoginResponse> {
+  const { data } = await http.post<LoginResponse>("/auth/login", payload);
   return data;
 }
 
@@ -16,8 +22,8 @@ export async function apiMe(): Promise<User> {
   return data;
 }
 
-export async function apiLogout(refreshToken: string): Promise<void> {
-  await http.post("/auth/logout", { refresh_token: refreshToken });
+export async function apiLogout(): Promise<void> {
+  await http.post("/auth/logout");
 }
 
 export async function apiForgotPassword(email: string): Promise<void> {

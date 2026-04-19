@@ -50,6 +50,7 @@ jobs:
             infra:
               - 'docker-compose.prod.yml'
               - 'scripts/deploy-remote.sh'
+              - 'deploy/nginx/**'
               - '.github/workflows/deploy.yml'
 
   # ----------------------------------------------------------------------
@@ -206,7 +207,7 @@ jobs:
   # selective deploy script. Restarts only the changed services.
   # ----------------------------------------------------------------------
   deploy:
-    name: Deploy to Hostinger VPS
+    name: Deploy to VPS
     needs: [changes, build-api, build-frontend]
     # `always()` so this runs even if one of the build jobs was skipped
     # because nothing in its tree changed. We then filter inside: if a
@@ -240,7 +241,7 @@ jobs:
           set -eu
           services=""
           if [[ "$INFRA_CHANGED" == "true" || "$FORCE" == "true" ]]; then
-            services="postgres redis api scheduler frontend"
+            services="postgres redis api scheduler frontend nginx"
           else
             [[ "$API_CHANGED" == "true" ]] && services="$services api scheduler"
             [[ "$FRONTEND_CHANGED" == "true" ]] && services="$services frontend"
@@ -310,10 +311,15 @@ jobs:
           set -eu
           port="${HOSTINGER_SSH_PORT:-22}"
           deploy_dir="${DEPLOY_DIR:-/opt/tradecore}"
+          ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
+            "mkdir -p $deploy_dir/deploy/nginx"
           scp -P "$port" \
             docker-compose.prod.yml \
             scripts/deploy-remote.sh \
             "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST:$deploy_dir/"
+          scp -P "$port" \
+            deploy/nginx/prod.conf \
+            "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST:$deploy_dir/deploy/nginx/"
           ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
             "chmod +x $deploy_dir/deploy-remote.sh"
 

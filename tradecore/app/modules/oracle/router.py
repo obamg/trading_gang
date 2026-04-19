@@ -1,17 +1,20 @@
 """Oracle API."""
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 
-from app.dependencies import CurrentUser, DBSession
+from app.dependencies import CurrentUser, DBSession, require_feature
 from app.errors import AppError
 from app.models.oracle import OracleOutcome, OracleSignal
 from app.models.settings import UserSettings
 from app.modules.oracle.engine import DEFAULT_WEIGHTS, compute_live_score, generate_signal
 
-router = APIRouter(prefix="/oracle", tags=["oracle"])
+router = APIRouter(
+    prefix="/oracle", tags=["oracle"],
+    dependencies=[Depends(require_feature("oracle"))],
+)
 
 
 def _serialize_signal(row: OracleSignal) -> dict:

@@ -17,6 +17,7 @@ class RiskInput:
     max_leverage: float = 20.0
     asset_type: str = "futures"  # futures | spot
     side: str = "long"            # long | short
+    maintenance_margin_rate: float = 0.004  # Binance smallest tier default (0.4%)
 
 
 def calculate_position(params: RiskInput) -> dict:
@@ -54,14 +55,15 @@ def calculate_position(params: RiskInput) -> dict:
         position_size_usd = balance * params.max_leverage
         position_size_units = position_size_usd / entry
 
-    # Liquidation price (simplified isolated-margin, no fees/maintenance margin).
-    # Only meaningful when the position is actually leveraged (> 1x).
+    # Liquidation price (isolated margin, includes maintenance margin rate).
+    # Maintenance margin rate varies by position size tier on Binance (0.4% - 5%).
     liquidation_price: float | None = None
+    mmr = params.maintenance_margin_rate
     if params.asset_type == "futures" and leverage > 1:
         if side == "long":
-            liquidation_price = entry * (1 - 1 / leverage)
+            liquidation_price = entry * (1 - 1 / leverage + mmr)
         else:
-            liquidation_price = entry * (1 + 1 / leverage)
+            liquidation_price = entry * (1 + 1 / leverage - mmr)
 
     max_loss_usd = position_size_units * abs(entry - stop)
 

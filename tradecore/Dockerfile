@@ -42,9 +42,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
 # Entrypoint runs migrations (and optional seed) before handing off to CMD.
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
-# Use gunicorn with uvicorn workers in production; scheduler container overrides CMD.
+# Single worker required: WebSocket ConnectionManager and Redis pubsub relay
+# are in-process singletons that cannot be shared across workers. Multiple
+# workers would cause split-brain WS state and duplicate alert delivery.
 CMD ["gunicorn", "app.main:app", \
-     "--workers", "4", \
+     "--workers", "1", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
      "--access-logfile", "-", \

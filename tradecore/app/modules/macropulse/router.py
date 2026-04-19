@@ -2,15 +2,18 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 
-from app.dependencies import CurrentUser, DBSession
+from app.dependencies import CurrentUser, DBSession, require_feature
 from app.models.macro import EconomicEvent, MacroSnapshot
 from app.modules.macropulse.score import compute_macro_context
 from app.services import redis_service
 
-router = APIRouter(prefix="/macro", tags=["macropulse"])
+router = APIRouter(
+    prefix="/macro", tags=["macropulse"],
+    dependencies=[Depends(require_feature("macropulse"))],
+)
 
 
 @router.get("/snapshot")

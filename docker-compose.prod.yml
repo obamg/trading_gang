@@ -1,14 +1,16 @@
-# TradeCore production stack — run with:
-#   docker-compose -f docker-compose.prod.yml --env-file .env.production up -d
+# TradeCore production stack — dedicated VPS (formationdouane.online)
 #
-# Assumes .env.production is populated from .env.production.example.
-# The SSL termination step (public facing) is expected to happen at a layer in
-# front of this stack (e.g. a load balancer or a second nginx with certbot).
+# Deploy:
+#   1. Copy repo to /opt/tradecore on the VPS
+#   2. Create .env.production (see .env.production.example)
+#   3. docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 #
-# Image tags are driven by env vars so CI can pin a specific git sha:
-#   API_IMAGE_TAG=abc1234 FRONTEND_IMAGE_TAG=abc1234 docker compose ... up -d
-# Defaults to `:latest` if not set. `build:` blocks are kept so the file remains
-# buildable locally via `docker compose -f docker-compose.prod.yml build`.
+# First-time TLS:
+#   docker compose -f docker-compose.prod.yml run --rm certbot certonly \
+#     --webroot -w /var/www/certbot \
+#     -d formationdouane.online -d www.formationdouane.online \
+#     --email ${CERTBOT_EMAIL} --agree-tos --no-eff-email
+#   docker compose -f docker-compose.prod.yml restart nginx
 
 services:
   postgres:
@@ -16,7 +18,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tradecore}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradecore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-tradecore}
     volumes:
       - pg_data:/var/lib/postgresql/data
@@ -31,7 +33,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -55,48 +57,46 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: production
-      DATABASE_URL: ${DATABASE_URL}
-      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC}
-      REDIS_URL: ${REDIS_URL}
-      RATE_LIMIT_STORAGE_URL: ${RATE_LIMIT_STORAGE_URL}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tradecore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tradecore}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-tradecore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tradecore}
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_STORAGE_URL: redis://redis:6379/1
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      FRONTEND_URL: ${FRONTEND_URL}
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
-      STRIPE_PRO_PRICE_ID_MONTHLY: ${STRIPE_PRO_PRICE_ID_MONTHLY}
-      STRIPE_PRO_PRICE_ID_YEARLY: ${STRIPE_PRO_PRICE_ID_YEARLY}
-      STRIPE_ELITE_PRICE_ID_MONTHLY: ${STRIPE_ELITE_PRICE_ID_MONTHLY}
-      STRIPE_ELITE_PRICE_ID_YEARLY: ${STRIPE_ELITE_PRICE_ID_YEARLY}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      FRONTEND_URL: https://formationdouane.online
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRO_PRICE_ID_MONTHLY: ${STRIPE_PRO_PRICE_ID_MONTHLY:-}
+      STRIPE_PRO_PRICE_ID_YEARLY: ${STRIPE_PRO_PRICE_ID_YEARLY:-}
+      STRIPE_ELITE_PRICE_ID_MONTHLY: ${STRIPE_ELITE_PRICE_ID_MONTHLY:-}
+      STRIPE_ELITE_PRICE_ID_YEARLY: ${STRIPE_ELITE_PRICE_ID_YEARLY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: https://formationdouane.online/api/auth/google/callback
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
-      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@tradecore.io}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@formationdouane.online}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-TradeCore}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-false}
-      WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY}
-      COINGLASS_API_KEY: ${COINGLASS_API_KEY}
-      COINGECKO_API_KEY: ${COINGECKO_API_KEY}
-      TRADING_ECONOMICS_API_KEY: ${TRADING_ECONOMICS_API_KEY}
+      WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      TRADING_ECONOMICS_API_KEY: ${TRADING_ECONOMICS_API_KEY:-}
       BINANCE_STREAMS_ENABLED: ${BINANCE_STREAMS_ENABLED:-true}
-      SCHEDULER_ENABLED: "false"  # Scheduler runs in its own container
-      # API container owns the migration — single writer, no contention.
+      SCHEDULER_ENABLED: "false"
       RUN_MIGRATIONS: "1"
       RUN_SEED: "0"
     networks:
       - tradecore
 
   scheduler:
-    # Same image as the API — a single build is tagged once and reused.
     image: ghcr.io/${GITHUB_REPOSITORY:-obamg/trading_gang}/api:${API_IMAGE_TAG:-latest}
     build:
       context: ./tradecore
@@ -109,26 +109,22 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: production
-      DATABASE_URL: ${DATABASE_URL}
-      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC}
-      REDIS_URL: ${REDIS_URL}
-      RATE_LIMIT_STORAGE_URL: ${RATE_LIMIT_STORAGE_URL}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tradecore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tradecore}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-tradecore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tradecore}
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_STORAGE_URL: redis://redis:6379/1
       JWT_SECRET: ${JWT_SECRET}
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      FRONTEND_URL: ${FRONTEND_URL}
+      FRONTEND_URL: https://formationdouane.online
       BINANCE_STREAMS_ENABLED: "false"
       SCHEDULER_ENABLED: "true"
-      WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY}
-      COINGLASS_API_KEY: ${COINGLASS_API_KEY}
-      COINGECKO_API_KEY: ${COINGECKO_API_KEY}
-      TRADING_ECONOMICS_API_KEY: ${TRADING_ECONOMICS_API_KEY}
-      # Migrations are owned by the api container; scheduler must not race them.
+      WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      TRADING_ECONOMICS_API_KEY: ${TRADING_ECONOMICS_API_KEY:-}
       RUN_MIGRATIONS: "0"
       RUN_SEED: "0"
-    # Same image, but headless — run the scheduler via a small entry script.
     command: ["python", "-m", "app.services.scheduler_standalone"]
-    # No HTTP server → curl-based image healthcheck would always fail.
     healthcheck:
       disable: true
     networks:
@@ -142,29 +138,42 @@ services:
       args:
         VITE_API_URL: /api
         VITE_WS_URL: /ws
-    container_name: tradecore_frontend
     restart: unless-stopped
     depends_on:
       - api
-    # Private publish on the toxal_toxal docker bridge gateway (172.18.0.1).
-    # That IP lives only on the host's docker bridge interface — not routable
-    # from the public internet — but is reachable from the toxal-nginx
-    # container, which terminates TLS for https://formationdouane.online and
-    # reverse-proxies here. Do NOT change to 0.0.0.0 or a public IP.
-    #
-    # If the toxal_toxal bridge ever gets recreated and picks a different
-    # gateway IP, update this value and the proxy_pass in
-    # deploy/nginx/formationdouane.online.conf to match. Check with:
-    #   docker network inspect toxal_toxal --format \
-    #     '{{(index .IPAM.Config 0).Gateway}}'
-    ports:
-      - "172.18.0.1:8090:80"
     networks:
       - tradecore
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/prod.conf:/etc/nginx/nginx.conf:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
+    networks:
+      - tradecore
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    # Only runs on-demand: docker compose run --rm certbot ...
+    profiles:
+      - certbot
 
 volumes:
   pg_data:
   redis_data:
+  certbot_www:
+  certbot_certs:
 
 networks:
   tradecore:

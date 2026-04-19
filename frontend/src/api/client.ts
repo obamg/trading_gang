@@ -5,7 +5,7 @@ export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export const http = axios.create({
   baseURL: API_URL,
-  withCredentials: false,
+  withCredentials: true,
 });
 
 // Attach JWT on every request
@@ -21,15 +21,13 @@ http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
-  const refresh = useAuthStore.getState().refreshToken;
-  if (!refresh) return null;
   try {
+    // Refresh token is sent automatically via httpOnly cookie
     const { data } = await axios.post<{
       access_token: string;
-      refresh_token: string;
       expires_in: number;
-    }>(`${API_URL}/auth/refresh`, { refresh_token: refresh });
-    useAuthStore.getState().setTokens(data.access_token, data.refresh_token);
+    }>(`${API_URL}/auth/refresh`, {}, { withCredentials: true });
+    useAuthStore.getState().setAccessToken(data.access_token);
     return data.access_token;
   } catch {
     useAuthStore.getState().clear();

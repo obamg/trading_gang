@@ -1,14 +1,17 @@
 """LiquidMap API."""
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select
 
-from app.dependencies import CurrentUser, DBSession
+from app.dependencies import CurrentUser, DBSession, require_feature
 from app.models.liquidmap import LiquidationEvent
 from app.modules.liquidmap.tracker import get_heatmap
 
-router = APIRouter(prefix="/liquidmap", tags=["liquidmap"])
+router = APIRouter(
+    prefix="/liquidmap", tags=["liquidmap"],
+    dependencies=[Depends(require_feature("liquidmap"))],
+)
 
 
 @router.get("/heatmap/{symbol}")

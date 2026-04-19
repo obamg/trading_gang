@@ -1,4 +1,4 @@
-"""MacroPulse — Yahoo macro metrics, ETF flows, stablecoin mcap, daily score.
+"""MacroPulse — Yahoo macro metrics, stablecoin mcap, daily score.
 
 Uses Yahoo's public v8 chart API rather than the yfinance library so we don't
 pull in pandas as a runtime dep. The chart API returns prior close + latest,
@@ -23,8 +23,6 @@ YF_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=5d&
 COINGECKO_STABLES = (
     "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=stablecoins&per_page=50&page=1"
 )
-COINGLASS_ETF = "https://open-api.coinglass.com/public/v2/indicator/bitcoin_etf"
-
 TICKERS = {
     "dxy": "DX-Y.NYB",
     "us10y": "^TNX",
@@ -81,28 +79,6 @@ async def collect_market_data() -> dict[str, dict]:
     return out
 
 
-async def _fetch_etf_flows(client: httpx.AsyncClient, api_key: str | None) -> float | None:
-    headers = {"coinglassSecret": api_key} if api_key else {}
-    try:
-        resp = await client.get(COINGLASS_ETF, headers=headers, timeout=15.0)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        log.warning("etf_flows_failed", err=str(e))
-        return None
-    # The endpoint returns an array of daily rows; last entry is most recent.
-    try:
-        rows = (data.get("data") or {}).get("list") or data.get("data") or []
-        if not rows:
-            return None
-        latest = rows[-1] if isinstance(rows, list) else None
-        if not latest:
-            return None
-        return float(latest.get("flowUsd") or latest.get("changeUsd") or 0)
-    except (KeyError, ValueError, AttributeError):
-        return None
-
-
 async def _fetch_stablecoin_mcap(client: httpx.AsyncClient) -> float | None:
     try:
         resp = await client.get(COINGECKO_STABLES, timeout=15.0)
@@ -117,7 +93,6 @@ def compute_macro_score(
     dxy_change: float | None,
     vix_value: float | None,
     us10y_change: float | None,
-    etf_flows: float | None,
     sp500_change: float | None,
 ) -> tuple[int, dict]:
     """Score in [-100, 100] plus the breakdown for /macro/score."""
@@ -135,10 +110,6 @@ def compute_macro_score(
         delta = -10 if us10y_change > 0 else 5 if us10y_change < 0 else 0
         score += delta
         breakdown["us10y"] = delta
-    if etf_flows is not None:
-        delta = 15 if etf_flows > 0 else -15 if etf_flows < 0 else 0
-        score += delta
-        breakdown["etf_flows"] = delta
     if sp500_change is not None:
         delta = 10 if sp500_change > 0 else -10 if sp500_change < 0 else 0
         score += delta
@@ -146,10 +117,9 @@ def compute_macro_score(
     return max(-100, min(100, score)), breakdown
 
 
-async def collect_daily_snapshot(db: AsyncSession, api_key: str | None = None) -> dict:
+async def collect_daily_snapshot(db: AsyncSession) -> dict:
     market = await collect_market_data()
     async with httpx.AsyncClient(timeout=20.0) as client:
-        etf_flows = await _fetch_etf_flows(client, api_key)
         stablecoin_mcap = await _fetch_stablecoin_mcap(client)
     dxy = market.get("dxy", {})
     vix = market.get("vix", {})
@@ -160,7 +130,6 @@ async def collect_daily_snapshot(db: AsyncSession, api_key: str | None = None) -
         dxy.get("change_pct"),
         vix.get("value"),
         us10y.get("change_pct"),
-        etf_flows,
         sp500.get("change_pct"),
     )
 
@@ -174,7 +143,6 @@ async def collect_daily_snapshot(db: AsyncSession, api_key: str | None = None) -
         sp500=_d(sp500.get("value")),
         nasdaq=_d(market.get("nasdaq", {}).get("value")),
         gold_usd=_d(market.get("gold", {}).get("value")),
-        btc_etf_flows_usd=_d(etf_flows),
         stablecoin_mcap_usd=_d(stablecoin_mcap),
         macro_score=score,
         snapshot_at=snapshot_at,
@@ -196,7 +164,7 @@ async def collect_daily_snapshot(db: AsyncSession, api_key: str | None = None) -
         ),
         ex=4 * 3600,
     )
-    log.info("macropulse_daily_snapshot", score=score, breakdown=breakdown, etf=etf_flows)
+    log.info("macropulse_daily_snapshot", score=score, breakdown=breakdown)
     return {"macro_score": score, "breakdown": breakdown, "snapshot_at": snapshot_at.isoformat()}
 
 

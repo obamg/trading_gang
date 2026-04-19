@@ -70,6 +70,27 @@ async def get_latest_candle(symbol: str) -> dict | None:
     return json.loads(raw) if raw else None
 
 
+async def get_candle_at(symbol: str, target_ts_ms: int, tolerance_ms: int = 300_000) -> dict | None:
+    """Return the candle whose open_time is closest to *target_ts_ms*.
+
+    Returns None if no candle is within *tolerance_ms* (default 5 min).
+    """
+    candles = await get_candles(symbol, limit=CANDLE_MAX)
+    if not candles:
+        return None
+    best: dict | None = None
+    best_diff = float("inf")
+    for c in candles:
+        ts = int(c.get("open_time", 0))
+        diff = abs(ts - target_ts_ms)
+        if diff < best_diff:
+            best_diff = diff
+            best = c
+    if best is not None and best_diff <= tolerance_ms:
+        return best
+    return None
+
+
 # ---------- trades stream ----------
 
 TRADES_STREAM_MAX = 1000

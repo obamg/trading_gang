@@ -1,22 +1,22 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiLogin, apiRegister, apiMe } from "@/api/auth";
+import { apiLogin, apiRegister, apiLogout, apiMe } from "@/api/auth";
 import { useAuthStore } from "@/stores/authStore";
 import type { LoginPayload, RegisterPayload } from "@/types/auth";
 
 export function useAuth() {
   const navigate = useNavigate();
-  const { setTokens, setUser, clear } = useAuthStore();
+  const { setAccessToken, setUser, clear } = useAuthStore();
 
   const login = useCallback(
     async (payload: LoginPayload) => {
       const tokens = await apiLogin(payload);
-      setTokens(tokens.access_token, tokens.refresh_token);
+      setAccessToken(tokens.access_token);
       const user = await apiMe();
       setUser(user);
       navigate("/");
     },
-    [navigate, setTokens, setUser],
+    [navigate, setAccessToken, setUser],
   );
 
   const register = useCallback(
@@ -27,7 +27,12 @@ export function useAuth() {
     [login],
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await apiLogout();
+    } catch {
+      // Best-effort — clear local state regardless
+    }
     clear();
     navigate("/login");
   }, [clear, navigate]);

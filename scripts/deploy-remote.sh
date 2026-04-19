@@ -44,9 +44,18 @@ echo "[deploy] pinning API_IMAGE_TAG=$API_TAG FRONTEND_IMAGE_TAG=$FRONTEND_TAG"
 echo "[deploy] services in scope: ${SERVICES[*]}"
 
 # Pull only the services we are about to restart.
-# Postgres/Redis are upstream images — never deploy-managed.
-docker compose -f docker-compose.prod.yml --env-file .env.production \
-  pull "${SERVICES[@]}"
+# Postgres/Redis/nginx are upstream images — never pull from GHCR.
+PULL_SERVICES=()
+for svc in "${SERVICES[@]}"; do
+  case "$svc" in
+    postgres|redis|nginx|certbot) ;;
+    *) PULL_SERVICES+=("$svc") ;;
+  esac
+done
+if [[ ${#PULL_SERVICES[@]} -gt 0 ]]; then
+  docker compose -f docker-compose.prod.yml --env-file .env.production \
+    pull "${PULL_SERVICES[@]}"
+fi
 
 # Recreate only the listed services; --no-deps leaves postgres/redis alone.
 # --remove-orphans cleans up any stray containers left from old configs.

@@ -20,9 +20,9 @@ On first boot this will:
 2. Run the one-shot **`seed`** service, which:
    - Applies all Alembic migrations (`alembic upgrade head`) — creates the schema and seeds the three plans (free/pro/elite).
    - Creates two ready-to-use test accounts.
-3. Start the **api** (port `8000`), **scheduler** (background jobs), and **frontend** (port `8080`).
+3. Start the **api** (port `8000`), **scheduler** (background jobs), and **frontend** (port `8081` by default).
 
-Once the stack is up, browse to **http://localhost:8080** and log in with:
+Once the stack is up, browse to **http://localhost:8081** and log in with:
 
 | Email                   | Password   | Notes                           |
 | ----------------------- | ---------- | ------------------------------- |
@@ -31,6 +31,12 @@ Once the stack is up, browse to **http://localhost:8080** and log in with:
 
 Subsequent runs are instant — the seed service is idempotent and exits immediately
 if the accounts already exist.
+
+If `8081` is already in use too, override the host port for the frontend:
+
+```bash
+FRONTEND_PORT=8091 docker compose up --build
+```
 
 ### Useful commands
 

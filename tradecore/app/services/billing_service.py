@@ -1,6 +1,7 @@
 """Stripe integration: checkout, portal, webhook event handling."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -52,7 +53,8 @@ async def _get_or_create_customer(db: AsyncSession, user: User) -> str:
     if sub and sub.stripe_customer_id:
         return sub.stripe_customer_id
 
-    customer = stripe.Customer.create(
+    customer = await asyncio.to_thread(
+        stripe.Customer.create,
         email=user.email,
         name=user.full_name or user.email,
         metadata={"user_id": str(user.id)},
@@ -79,7 +81,8 @@ async def create_checkout_session(
     customer_id = await _get_or_create_customer(db, user)
     await db.commit()
 
-    session = stripe.checkout.Session.create(
+    session = await asyncio.to_thread(
+        stripe.checkout.Session.create,
         mode="subscription",
         customer=customer_id,
         line_items=[{"price": price_id, "quantity": 1}],
@@ -98,7 +101,8 @@ async def create_portal_session(db: AsyncSession, user: User) -> str:
     if sub is None or not sub.stripe_customer_id:
         raise AppError(404, "No Stripe customer for this user", "NO_CUSTOMER")
 
-    portal = stripe.billing_portal.Session.create(
+    portal = await asyncio.to_thread(
+        stripe.billing_portal.Session.create,
         customer=sub.stripe_customer_id,
         return_url=f"{settings.frontend_url}/billing",
     )
@@ -140,7 +144,7 @@ async def _find_user_by_customer(db: AsyncSession, customer_id: str) -> UUID | N
         return sub.user_id
     # Fallback to Stripe metadata
     try:
-        customer = stripe.Customer.retrieve(customer_id)
+        customer = await asyncio.to_thread(stripe.Customer.retrieve, customer_id)
         uid = customer.get("metadata", {}).get("user_id")
         return UUID(uid) if uid else None
     except Exception:
@@ -269,6 +273,8 @@ async def handle_webhook_event(db: AsyncSession, event: stripe.Event) -> None:
         await _handle_invoice(db, data, paid=False)
     else:
         log.debug("unhandled_stripe_event", type=etype)
+
+    await db.commit()
 
 
 # ---------- current subscription lookup ----------

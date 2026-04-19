@@ -2,14 +2,17 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 
-from app.dependencies import CurrentUser, DBSession
+from app.dependencies import CurrentUser, DBSession, require_feature
 from app.models.sentiment import MarketSentimentSnapshot, SentimentSnapshot
 from app.services import redis_service
 
-router = APIRouter(prefix="/sentiment", tags=["sentimentpulse"])
+router = APIRouter(
+    prefix="/sentiment", tags=["sentimentpulse"],
+    dependencies=[Depends(require_feature("sentimentpulse"))],
+)
 
 
 @router.get("/overview")

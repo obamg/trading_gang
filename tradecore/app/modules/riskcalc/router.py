@@ -2,16 +2,20 @@
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 
-from app.dependencies import CurrentUser, DBSession
+from app.dependencies import CurrentUser, DBSession, require_feature
 from app.errors import AppError
 from app.models.riskcalc import RiskCalcHistory
 from app.modules.riskcalc.calculator import RiskInput, calculate_position
+from app.modules.riskcalc.portfolio import check_portfolio_risk
 
-router = APIRouter(prefix="/riskcalc", tags=["riskcalc"])
+router = APIRouter(
+    prefix="/riskcalc", tags=["riskcalc"],
+    dependencies=[Depends(require_feature("riskcalc"))],
+)
 
 
 class CalcRequest(BaseModel):
@@ -44,6 +48,14 @@ async def calculate(payload: CalcRequest, user: CurrentUser, db: DBSession):
         )
     except ValueError as e:
         raise AppError(400, str(e), "INVALID_INPUT") from e
+
+    # Portfolio-level risk check
+    portfolio_warnings = await check_portfolio_risk(
+        db, user.id,
+        new_risk_usd=result["risk_amount_usd"],
+        account_balance=payload.account_balance_usd,
+    )
+    result["warnings"].extend(portfolio_warnings)
 
     row = RiskCalcHistory(
         user_id=user.id,

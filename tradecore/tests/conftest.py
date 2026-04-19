@@ -39,6 +39,7 @@ class FakeRedis:
         self._lists: dict[str, list[str]] = {}
         self._keys: dict[str, str] = {}
         self._sets: dict[str, set[str]] = {}
+        self._hashes: dict[str, dict[str, str]] = {}
         self._published: list[tuple[str, str]] = []
 
     async def ping(self) -> bool:
@@ -84,6 +85,18 @@ class FakeRedis:
     async def sadd(self, key: str, *members: str):
         self._sets.setdefault(key, set()).update(members)
         return len(members)
+
+    async def hincrbyfloat(self, key: str, field: str, increment: float):
+        self._hashes.setdefault(key, {})
+        cur = float(self._hashes[key].get(field, "0"))
+        self._hashes[key][field] = str(cur + increment)
+        return cur + increment
+
+    async def hgetall(self, key: str):
+        return dict(self._hashes.get(key, {}))
+
+    async def expire(self, key: str, seconds: int):
+        return True
 
     async def publish(self, channel: str, message: str):
         self._published.append((channel, message))

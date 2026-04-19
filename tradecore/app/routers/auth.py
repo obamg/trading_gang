@@ -3,7 +3,7 @@ import secrets
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query, Request, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.config import settings
 from app.dependencies import CurrentUser, DBSession
@@ -24,11 +24,29 @@ from app.services import auth_service, google_oauth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+_REFRESH_COOKIE = "refresh_token"
+_REFRESH_MAX_AGE = settings.jwt_refresh_ttl_days * 86400
+
 
 def _client_context(request: Request) -> tuple[str | None, str | None]:
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
     return ip, ua
+
+
+def _set_refresh_cookie(response: JSONResponse | RedirectResponse, token: str) -> None:
+    response.set_cookie(
+        _REFRESH_COOKIE, token,
+        max_age=_REFRESH_MAX_AGE,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="strict",
+        path="/auth",
+    )
+
+
+def _clear_refresh_cookie(response: JSONResponse | RedirectResponse) -> None:
+    response.delete_cookie(_REFRESH_COOKIE, path="/auth")
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -40,32 +58,51 @@ async def register(request: Request, payload: RegisterRequest, db: DBSession):
     return user
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 @limiter.limit("10/15minutes")
 async def login(request: Request, payload: LoginRequest, db: DBSession):
     user = await auth_service.authenticate(db, payload.email, payload.password)
     ip, ua = _client_context(request)
     access, refresh, ttl = await auth_service.issue_tokens(db, user.id, ip, ua)
     await db.commit()
-    return TokenResponse(access_token=access, refresh_token=refresh, expires_in=ttl)
+    response = JSONResponse(content={
+        "access_token": access,
+        "token_type": "bearer",
+        "expires_in": ttl,
+    })
+    _set_refresh_cookie(response, refresh)
+    return response
 
 
-@router.post("/refresh", response_model=TokenResponse)
-@limiter.limit("60/minute")
-async def refresh(request: Request, payload: RefreshRequest, db: DBSession):
+@router.post("/refresh")
+@limiter.limit("10/minute")
+async def refresh(request: Request, db: DBSession):
+    refresh_token = request.cookies.get(_REFRESH_COOKIE)
+    if not refresh_token:
+        raise AppError(401, "Missing refresh token", "UNAUTHORIZED")
     ip, ua = _client_context(request)
     access, new_refresh, ttl = await auth_service.rotate_refresh_token(
-        db, payload.refresh_token, ip, ua
+        db, refresh_token, ip, ua
     )
     await db.commit()
-    return TokenResponse(access_token=access, refresh_token=new_refresh, expires_in=ttl)
+    response = JSONResponse(content={
+        "access_token": access,
+        "token_type": "bearer",
+        "expires_in": ttl,
+    })
+    _set_refresh_cookie(response, new_refresh)
+    return response
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(payload: RefreshRequest, db: DBSession, user: CurrentUser):
-    await auth_service.invalidate_refresh_token(db, payload.refresh_token)
-    await db.commit()
-    return MessageResponse(message="Logged out")
+async def logout(request: Request, db: DBSession, user: CurrentUser):
+    refresh_token = request.cookies.get(_REFRESH_COOKIE)
+    if refresh_token:
+        await auth_service.invalidate_refresh_token(db, refresh_token)
+        await db.commit()
+    response = JSONResponse(content={"message": "Logged out"})
+    _clear_refresh_cookie(response)
+    return response
 
 
 @router.get("/me", response_model=UserResponse)
@@ -127,13 +164,13 @@ async def google_callback(
     access, refresh, ttl = await auth_service.issue_tokens(db, user.id, ip, ua)
     await db.commit()
 
-    # Redirect back to frontend with tokens in URL fragment (not logged server-side).
+    # Redirect with only the access token in the fragment; refresh goes in httpOnly cookie.
     params = urlencode({
         "access_token": access,
-        "refresh_token": refresh,
         "expires_in": ttl,
     })
     frontend = settings.frontend_url.rstrip("/")
     resp = RedirectResponse(url=f"{frontend}/auth/callback#{params}")
+    _set_refresh_cookie(resp, refresh)
     resp.delete_cookie("oauth_state")
     return resp

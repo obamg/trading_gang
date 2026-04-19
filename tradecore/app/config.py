@@ -84,7 +84,6 @@ class Settings(BaseSettings):
     min_volume_24h_usd: float = 10_000_000.0
 
     # Analysis modules (Team 5)
-    coinglass_api_key: str = ""
     coingecko_api_key: str = ""
     trading_economics_api_key: str = ""
 
