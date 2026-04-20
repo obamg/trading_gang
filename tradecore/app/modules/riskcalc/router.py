@@ -2,11 +2,11 @@
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 
-from app.dependencies import CurrentUser, DBSession, require_feature
+from app.dependencies import CurrentUser, DBSession
 from app.errors import AppError
 from app.models.riskcalc import RiskCalcHistory
 from app.modules.riskcalc.calculator import RiskInput, calculate_position
@@ -14,7 +14,6 @@ from app.modules.riskcalc.portfolio import check_portfolio_risk
 
 router = APIRouter(
     prefix="/riskcalc", tags=["riskcalc"],
-    dependencies=[Depends(require_feature("riskcalc"))],
 )
 
 

@@ -24,7 +24,6 @@ from app.errors import (
 from app.logging_config import configure_logging, log
 from app.rate_limit import limiter
 from app.routers import auth as auth_router
-from app.routers import billing as billing_router
 from app.routers import ws as ws_router
 from app.modules.gemradar.router import router as gemradar_router
 from app.modules.liquidmap.router import router as liquidmap_router
@@ -138,7 +137,6 @@ app.add_exception_handler(RequestValidationError, validation_error_handler)
 # ----- Routers -----
 
 app.include_router(auth_router.router)
-app.include_router(billing_router.router)
 app.include_router(ws_router.router)
 app.include_router(radarx_router)
 app.include_router(whaleradar_router)

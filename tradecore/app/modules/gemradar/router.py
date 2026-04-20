@@ -1,13 +1,12 @@
 """GemRadar API."""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from sqlalchemy import desc, select
 
-from app.dependencies import CurrentUser, DBSession, require_feature
+from app.dependencies import CurrentUser, DBSession
 from app.models.gemradar import GemRadarAlert
 
 router = APIRouter(
     prefix="/gemradar", tags=["gemradar"],
-    dependencies=[Depends(require_feature("gemradar"))],
 )
 
 

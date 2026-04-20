@@ -310,7 +310,7 @@ jobs:
         run: |
           set -eu
           port="${HOSTINGER_SSH_PORT:-22}"
-          deploy_dir="${DEPLOY_DIR:-/opt/tradecore}"
+          deploy_dir="${DEPLOY_DIR:-/opt/trading_gang}"
           ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
             "mkdir -p $deploy_dir/deploy/nginx"
           scp -P "$port" \
@@ -334,7 +334,7 @@ jobs:
         run: |
           set -eu
           port="${HOSTINGER_SSH_PORT:-22}"
-          deploy_dir="${DEPLOY_DIR:-/opt/tradecore}"
+          deploy_dir="${DEPLOY_DIR:-/opt/trading_gang}"
           ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
             "cd $deploy_dir && DEPLOY_DIR=$deploy_dir ./deploy-remote.sh $SHA $SHA $SERVICES"
 

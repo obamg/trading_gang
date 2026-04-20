@@ -26,14 +26,6 @@ class Settings(BaseSettings):
     jwt_access_ttl_minutes: int = 15
     jwt_refresh_ttl_days: int = 7
 
-    # Stripe
-    stripe_secret_key: str = "sk_test_placeholder"
-    stripe_webhook_secret: str = "whsec_placeholder"
-    stripe_pro_price_id_monthly: str = "price_pro_monthly_placeholder"
-    stripe_pro_price_id_yearly: str = "price_pro_yearly_placeholder"
-    stripe_elite_price_id_monthly: str = "price_elite_monthly_placeholder"
-    stripe_elite_price_id_yearly: str = "price_elite_yearly_placeholder"
-
     # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""

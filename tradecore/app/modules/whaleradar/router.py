@@ -1,15 +1,14 @@
 """WhaleRadar API."""
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from sqlalchemy import desc, func, select
 
-from app.dependencies import CurrentUser, DBSession, require_feature
+from app.dependencies import CurrentUser, DBSession
 from app.models.whaleradar import OISurgeEvent, WhaleOnchainTransfer, WhaleTrade
 
 router = APIRouter(
     prefix="/whaleradar", tags=["whaleradar"],
-    dependencies=[Depends(require_feature("whaleradar"))],
 )
 
 

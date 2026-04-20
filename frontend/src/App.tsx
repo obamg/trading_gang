@@ -97,7 +97,6 @@ export default function App() {
             <Route path="/performance" element={<PerformancePage />} />
             <Route path="/oracle" element={<OraclePage />} />
             <Route path="/settings" element={<Placeholder label="Settings" />} />
-            <Route path="/billing" element={<Placeholder label="Billing" />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

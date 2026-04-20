@@ -1,16 +1,15 @@
 """PerformanceCore API."""
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from sqlalchemy import case, desc, extract, func, select
 
-from app.dependencies import CurrentUser, DBSession, require_feature
+from app.dependencies import CurrentUser, DBSession
 from app.models.tradelog import Trade
 from app.modules.performance.aggregator import compute_signal_accuracy, compute_user_performance
 
 router = APIRouter(
     prefix="/performance", tags=["performance"],
-    dependencies=[Depends(require_feature("performancecore"))],
 )
 
 

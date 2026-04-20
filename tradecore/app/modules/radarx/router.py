@@ -2,17 +2,16 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from sqlalchemy import desc, func, select
 
-from app.dependencies import CurrentUser, DBSession, require_feature
+from app.dependencies import CurrentUser, DBSession
 from app.errors import AppError
 from app.models.radarx import RadarXAlert
 from app.modules.radarx import detector
 
 router = APIRouter(
     prefix="/radarx", tags=["radarx"],
-    dependencies=[Depends(require_feature("radarx"))],
 )
 
 

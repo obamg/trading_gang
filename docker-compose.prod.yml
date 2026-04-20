@@ -5,12 +5,9 @@
 #   2. Create .env.production (see .env.production.example)
 #   3. docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 #
-# First-time TLS:
-#   docker compose -f docker-compose.prod.yml run --rm certbot certonly \
-#     --webroot -w /var/www/certbot \
-#     -d formationdouane.online -d www.formationdouane.online \
-#     --email ${CERTBOT_EMAIL} --agree-tos --no-eff-email
-#   docker compose -f docker-compose.prod.yml restart nginx
+# TLS: Cloudflare Origin Certificate
+#   Place origin.pem and origin-key.pem in ./certs/
+#   Set Cloudflare SSL/TLS mode to "Full (strict)"
 
 services:
   postgres:
@@ -66,12 +63,6 @@ services:
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       FRONTEND_URL: https://formationdouane.online
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-      STRIPE_PRO_PRICE_ID_MONTHLY: ${STRIPE_PRO_PRICE_ID_MONTHLY:-}
-      STRIPE_PRO_PRICE_ID_YEARLY: ${STRIPE_PRO_PRICE_ID_YEARLY:-}
-      STRIPE_ELITE_PRICE_ID_MONTHLY: ${STRIPE_ELITE_PRICE_ID_MONTHLY:-}
-      STRIPE_ELITE_PRICE_ID_YEARLY: ${STRIPE_ELITE_PRICE_ID_YEARLY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: https://formationdouane.online/api/auth/google/callback
@@ -155,25 +146,13 @@ services:
       - "443:443"
     volumes:
       - ./deploy/nginx/prod.conf:/etc/nginx/nginx.conf:ro
-      - certbot_www:/var/www/certbot:ro
-      - certbot_certs:/etc/letsencrypt:ro
+      - ./certs:/etc/ssl/cloudflare:ro
     networks:
       - tradecore
-
-  certbot:
-    image: certbot/certbot
-    volumes:
-      - certbot_www:/var/www/certbot
-      - certbot_certs:/etc/letsencrypt
-    # Only runs on-demand: docker compose run --rm certbot ...
-    profiles:
-      - certbot
 
 volumes:
   pg_data:
   redis_data:
-  certbot_www:
-  certbot_certs:
 
 networks:
   tradecore:

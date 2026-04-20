@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Settings, CreditCard, HelpCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Settings, HelpCircle } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { cn } from "@/components/ui/cn";
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -52,7 +52,6 @@ export function Sidebar() {
       <div className="mt-auto flex flex-col gap-1 border-t border-borderSubtle p-2">
         {[
           { to: "/settings", icon: Settings, label: "Settings" },
-          { to: "/billing", icon: CreditCard, label: "Billing" },
           { to: "/help", icon: HelpCircle, label: "Help" },
         ].map((it) => {
           const Icon = it.icon;

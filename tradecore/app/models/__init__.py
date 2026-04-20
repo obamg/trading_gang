@@ -1,7 +1,6 @@
 """All SQLAlchemy ORM models. Imported here so Alembic autogenerate sees them."""
 from app.models.base import Base  # noqa: F401
 from app.models.user import User, Session, EmailVerification, PasswordReset  # noqa: F401
-from app.models.billing import Plan, Subscription, Invoice  # noqa: F401
 from app.models.settings import UserSettings, Watchlist  # noqa: F401
 from app.models.market import Symbol  # noqa: F401
 from app.models.radarx import RadarXAlert  # noqa: F401

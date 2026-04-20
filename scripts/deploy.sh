@@ -12,7 +12,7 @@
 set -euo pipefail
 
 DOMAIN="formationdouane.online"
-APP_DIR="/opt/tradecore"
+APP_DIR="/opt/trading_gang"
 COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
 
@@ -82,7 +82,7 @@ if [ ! -f "$ENV_FILE" ]; then
     sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$ENCRYPTION_KEY|" "$ENV_FILE"
 
     log "Secrets auto-generated in $ENV_FILE"
-    log "Edit $ENV_FILE to add Stripe, Google OAuth, and API keys before continuing."
+    log "Edit $ENV_FILE to add Google OAuth and API keys before continuing."
     log "Then re-run this script."
     exit 0
 fi

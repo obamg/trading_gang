@@ -1,4 +1,4 @@
-"""Reusable FastAPI dependencies: db session, current user, plan guards."""
+"""Reusable FastAPI dependencies: db session, current user."""
 from __future__ import annotations
 
 from typing import Annotated
@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.errors import AppError
-from app.models.billing import Plan, Subscription
 from app.models.user import User
 from app.services.auth_service import decode_access_token
 
@@ -49,29 +48,3 @@ async def get_current_verified_user(user: CurrentUser) -> User:
     return user
 
 
-async def user_has_access(db: AsyncSession, user_id, feature_name: str) -> bool:
-    """Returns True if the user's active plan has `feature_name` set to True."""
-    result = await db.execute(
-        select(Plan)
-        .join(Subscription, Subscription.plan_id == Plan.id)
-        .where(Subscription.user_id == user_id, Subscription.status == "active")
-        .order_by(Subscription.created_at.desc())
-        .limit(1)
-    )
-    plan = result.scalar_one_or_none()
-    if plan is None:
-        return False
-    return bool(plan.features.get(feature_name, False))
-
-
-def require_feature(feature_name: str):
-    """Dependency factory — guards a route behind a plan feature flag."""
-    async def _guard(user: CurrentUser, db: DBSession) -> User:
-        if not await user_has_access(db, user.id, feature_name):
-            raise AppError(
-                403,
-                f"Your plan does not include '{feature_name}'",
-                "FEATURE_NOT_AVAILABLE",
-            )
-        return user
-    return _guard

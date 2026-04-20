@@ -124,13 +124,6 @@ async def invalidate_refresh_token(db: AsyncSession, refresh_token: str) -> None
 
 # ---------- registration / login ----------
 
-async def _get_free_plan_id(db: AsyncSession) -> UUID | None:
-    from app.models.billing import Plan
-    result = await db.execute(select(Plan).where(Plan.name == "free"))
-    plan = result.scalar_one_or_none()
-    return plan.id if plan else None
-
-
 async def register_user(
     db: AsyncSession,
     email: str,
@@ -153,17 +146,6 @@ async def register_user(
     # Create default user settings row
     db.add(UserSettings(user_id=user.id))
     db.add(Watchlist(user_id=user.id, name="Default", symbols=[], is_default=True))
-
-    # Auto-subscribe to Free plan
-    free_plan_id = await _get_free_plan_id(db)
-    if free_plan_id is not None:
-        from app.models.billing import Subscription
-        db.add(Subscription(
-            user_id=user.id,
-            plan_id=free_plan_id,
-            status="active",
-            billing_cycle="monthly",
-        ))
 
     # Issue email verification token
     raw_token = secrets.token_urlsafe(32)

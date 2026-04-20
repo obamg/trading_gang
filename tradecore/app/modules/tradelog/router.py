@@ -3,18 +3,17 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select
 
-from app.dependencies import CurrentUser, DBSession, require_feature
+from app.dependencies import CurrentUser, DBSession
 from app.errors import AppError
 from app.models.tradelog import Trade, TradeTag
 from app.modules.tradelog import service
 
 router = APIRouter(
     prefix="/tradelog", tags=["tradelog"],
-    dependencies=[Depends(require_feature("tradelog"))],
 )
 
 

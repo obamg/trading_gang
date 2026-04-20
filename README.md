@@ -75,7 +75,7 @@ Actions selective deploy (only the changed services restart).
 
 Use `docker-compose.prod.yml` with a populated `.env.production` (see
 `.env.production.example` for the full list of required secrets — `JWT_SECRET`,
-`APP_SECRET_KEY`, `ENCRYPTION_KEY`, Stripe keys, SendGrid, etc.).
+`APP_SECRET_KEY`, `ENCRYPTION_KEY`, SendGrid, etc.).
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d

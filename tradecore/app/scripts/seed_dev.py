@@ -3,8 +3,6 @@
 Idempotent: safe to run repeatedly. Creates:
   * A verified test user (test@example.com / test1234) with default watchlist + settings
   * A second empty account (demo@example.com / demo1234) for multi-user testing
-  * Subscribes both users to the Free plan (already seeded by migration 002)
-
 Note: we use ``example.com`` rather than a .local domain because pydantic's
 EmailStr validator rejects special-use TLDs; the /auth routes use EmailStr so
 seeded accounts must pass the same check to be loggable.
@@ -23,7 +21,6 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.logging_config import configure_logging, log
-from app.models.billing import Plan, Subscription
 from app.models.settings import UserSettings, Watchlist
 from app.models.user import User
 from app.services.auth_service import hash_password
@@ -74,18 +71,6 @@ async def _seed_user(db, spec: dict) -> tuple[User, bool]:
             is_default=True,
         )
     )
-
-    free_plan = await db.execute(select(Plan).where(Plan.name == "free"))
-    plan = free_plan.scalar_one_or_none()
-    if plan is not None:
-        db.add(
-            Subscription(
-                user_id=user.id,
-                plan_id=plan.id,
-                status="active",
-                billing_cycle="monthly",
-            )
-        )
     return user, True
 
 

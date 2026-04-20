@@ -83,17 +83,5 @@ async def find_or_create_google_user(db: AsyncSession, userinfo: dict) -> User:
     await db.flush()
     db.add(UserSettings(user_id=user.id))
     db.add(Watchlist(user_id=user.id, name="Default", symbols=[], is_default=True))
-
-    # Auto-subscribe to Free plan
-    from app.models.billing import Plan, Subscription
-    plan_result = await db.execute(select(Plan).where(Plan.name == "free"))
-    free = plan_result.scalar_one_or_none()
-    if free:
-        db.add(Subscription(
-            user_id=user.id,
-            plan_id=free.id,
-            status="active",
-            billing_cycle="monthly",
-        ))
     await db.flush()
     return user

@@ -8,7 +8,7 @@
 ```
 PostgreSQL (persistent storage)   Redis (in-memory, real-time)
 ├── Users & Auth                  ├── Live candle buffers
-├── Billing & Subscriptions       ├── Current funding rates & OI
+├── User Settings & Watchlists    ├── Current funding rates & OI
 ├── User Settings & Watchlists    ├── Live liquidation heatmap
 ├── RadarX Alerts                 ├── User sessions
 ├── WhaleRadar Events             └── WebSocket routing table
@@ -82,64 +82,7 @@ CREATE TABLE password_resets (
 
 ---
 
-## 2. Billing & Subscriptions
-
-### `plans`
-```sql
-CREATE TABLE plans (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name                VARCHAR(50) NOT NULL,            -- 'free', 'pro', 'elite'
-    display_name        VARCHAR(100) NOT NULL,
-    price_monthly_usd   NUMERIC(10,2) DEFAULT 0,
-    price_yearly_usd    NUMERIC(10,2) DEFAULT 0,
-    stripe_price_id_monthly  VARCHAR(100),
-    stripe_price_id_yearly   VARCHAR(100),
-    features            JSONB NOT NULL DEFAULT '{}',     -- module access flags
-    max_watchlist_size  INTEGER DEFAULT 10,
-    alert_delay_seconds INTEGER DEFAULT 300,             -- 0 = real-time, 300 = 5min delay
-    is_active           BOOLEAN DEFAULT TRUE,
-    created_at          TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-### `subscriptions`
-```sql
-CREATE TABLE subscriptions (
-    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id                     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    plan_id                     UUID NOT NULL REFERENCES plans(id),
-    status                      VARCHAR(50) NOT NULL,   -- 'active', 'cancelled', 'past_due', 'trialing'
-    stripe_subscription_id      VARCHAR(100) UNIQUE,
-    stripe_customer_id          VARCHAR(100),
-    billing_cycle               VARCHAR(20) DEFAULT 'monthly',  -- 'monthly', 'yearly'
-    current_period_start        TIMESTAMPTZ,
-    current_period_end          TIMESTAMPTZ,
-    trial_end                   TIMESTAMPTZ,
-    cancelled_at                TIMESTAMPTZ,
-    created_at                  TIMESTAMPTZ DEFAULT NOW(),
-    updated_at                  TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-### `invoices`
-```sql
-CREATE TABLE invoices (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    subscription_id     UUID REFERENCES subscriptions(id),
-    stripe_invoice_id   VARCHAR(100) UNIQUE,
-    amount_usd          NUMERIC(10,2) NOT NULL,
-    status              VARCHAR(50),                    -- 'paid', 'open', 'void', 'uncollectible'
-    invoice_pdf_url     VARCHAR(500),
-    period_start        TIMESTAMPTZ,
-    period_end          TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
----
-
-## 3. User Settings & Preferences
+## 2. User Settings & Preferences
 
 ### `user_settings`
 ```sql
@@ -740,7 +683,6 @@ CREATE INDEX idx_cooldown_until ON alert_cooldowns(cooldown_until);
 | Category | Tables | Storage Type |
 |----------|--------|-------------|
 | Users & Auth | 4 tables | PostgreSQL |
-| Billing | 3 tables | PostgreSQL |
 | Settings | 2 tables | PostgreSQL |
 | Market Reference | 1 table | PostgreSQL |
 | RadarX | 1 table | PostgreSQL |

@@ -34,7 +34,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
   exit 0
 fi
 
-DEPLOY_DIR="${DEPLOY_DIR:-/opt/tradecore}"
+DEPLOY_DIR="${DEPLOY_DIR:-/opt/trading_gang}"
 cd "$DEPLOY_DIR"
 
 export API_IMAGE_TAG="$API_TAG"
