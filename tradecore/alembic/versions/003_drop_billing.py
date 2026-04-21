@@ -15,9 +15,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_table("invoices")
-    op.drop_table("subscriptions")
-    op.drop_table("plans")
+    op.execute("DROP TABLE IF EXISTS invoices")
+    op.execute("DROP TABLE IF EXISTS subscriptions")
+    op.execute("DROP TABLE IF EXISTS plans")
 
 
 def downgrade() -> None:
