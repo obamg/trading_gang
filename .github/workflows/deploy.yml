@@ -348,13 +348,15 @@ jobs:
             echo "HOSTINGER_HEALTH_URL not set — skipping post-deploy probe"
             exit 0
           fi
-          for i in 1 2 3 4 5 6; do
+          echo "waiting 30s for containers to start..."
+          sleep 30
+          for i in 1 2 3 4 5 6 7 8; do
             if curl -fsSk "$url" >/dev/null; then
               echo "health check ok ($url)"
               exit 0
             fi
             echo "attempt $i failed, retrying..."
-            sleep 5
+            sleep 10
           done
-          echo "health check FAILED after 6 attempts"
+          echo "health check FAILED after 8 attempts"
           exit 1
