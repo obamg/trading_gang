@@ -1,4 +1,5 @@
-import { Bell, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
+import { NotificationCenter } from "./NotificationCenter";
 import { useMacroStore } from "@/stores/macroStore";
 import { useAuthStore } from "@/stores/authStore";
 import { apiLogout } from "@/api/auth";
@@ -52,9 +53,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-3">
-        <button aria-label="Notifications" className="rounded-md p-1.5 text-textSecondary hover:bg-bgHover hover:text-textPrimary">
-          <Bell size={18} />
-        </button>
+        <NotificationCenter />
         <div className="flex items-center gap-2">
           <div className="h-7 w-7 rounded-full bg-primary-subtle text-center text-xs font-semibold leading-7 text-primary-400">
             {(user?.email?.[0] ?? "?").toUpperCase()}

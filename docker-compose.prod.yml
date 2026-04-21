@@ -128,7 +128,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: /api
-        VITE_WS_URL: wss://ws.formationdouane.online/ws
+        VITE_WS_URL: wss://formationdouane.online/ws
     restart: unless-stopped
     depends_on:
       - api

@@ -36,17 +36,16 @@ async def scan_large_trades(db: AsyncSession, symbol: str, min_trade_usd: float 
     fired: list[dict] = []
     for t in trades:
         try:
-            quote_qty = float(t.get("quote_qty", 0))
-            price = float(t.get("price", 0))
-            ts = int(float(t.get("timestamp", 0)))
+            quote_qty = float(t.get("usd") or t.get("quote_qty") or 0)
+            price = float(t.get("p") or t.get("price") or 0)
+            ts = int(float(t.get("T") or t.get("timestamp") or 0))
         except (TypeError, ValueError):
             continue
         if quote_qty < min_trade_usd:
             continue
         if await redis_service.is_on_cooldown("whaleradar", symbol):
-            # One alert per cooldown window per symbol
             break
-        buyer_maker = str(t.get("buyer_maker", "false")).lower() in ("true", "1")
+        buyer_maker = str(t.get("m") or t.get("buyer_maker") or "0") in ("true", "1")
         side = "sell" if buyer_maker else "buy"
         detected_at = datetime.fromtimestamp(ts / 1000, tz=timezone.utc) if ts else datetime.now(timezone.utc)
         row = WhaleTrade(
@@ -102,7 +101,7 @@ async def scan_oi_surges(db: AsyncSession, symbols: list[str] | None = None) -> 
                 continue
 
             candle = await redis_service.get_latest_candle(symbol)
-            price = float(candle.get("close", 0)) if candle else 0.0
+            price = float(candle.get("c") or candle.get("close") or 0) if candle else 0.0
             oi_usd = oi_contracts * price
             prev = await redis_service.get_open_interest(symbol)
             await redis_service.set_open_interest(

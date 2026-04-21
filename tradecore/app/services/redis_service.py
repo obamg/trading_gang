@@ -81,7 +81,7 @@ async def get_candle_at(symbol: str, target_ts_ms: int, tolerance_ms: int = 300_
     best: dict | None = None
     best_diff = float("inf")
     for c in candles:
-        ts = int(c.get("open_time", 0))
+        ts = int(c.get("t") or c.get("open_time") or 0)
         diff = abs(ts - target_ts_ms)
         if diff < best_diff:
             best_diff = diff

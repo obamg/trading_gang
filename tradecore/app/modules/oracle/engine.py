@@ -552,7 +552,7 @@ async def measure_outcomes() -> int:
                             candle = latest
                 if candle is None:
                     return
-                price = float(candle.get("close", 0))
+                price = float(candle.get("c") or candle.get("close") or 0)
                 if price <= 0:
                     return
                 setattr(out, slot, Decimal(str(price)))

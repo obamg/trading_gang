@@ -35,7 +35,7 @@ async def ingest_event(db: AsyncSession, event: dict) -> dict | None:
     try:
         symbol = str(event["symbol"]).upper()
         side = str(event["side"]).lower()
-        size_usd = float(event.get("size_usd") or event.get("size") or 0)
+        size_usd = float(event.get("usd") or event.get("size_usd") or event.get("size") or 0)
         price = float(event.get("price") or 0)
     except (KeyError, TypeError, ValueError):
         return None

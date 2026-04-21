@@ -29,20 +29,23 @@ COOLDOWN_MINUTES = 30
 
 def _candle_quote_volume(candle: dict) -> float:
     """Accept either pre-computed quote_volume or fall back to close*volume."""
-    if "quote_volume" in candle:
-        try:
-            return float(candle["quote_volume"])
-        except (TypeError, ValueError):
-            pass
+    for key in ("q", "quote_volume"):
+        if key in candle:
+            try:
+                return float(candle[key])
+            except (TypeError, ValueError):
+                pass
     try:
-        return float(candle.get("close", 0)) * float(candle.get("volume", 0))
+        close = float(candle.get("c") or candle.get("close") or 0)
+        vol = float(candle.get("v") or candle.get("volume") or 0)
+        return close * vol
     except (TypeError, ValueError):
         return 0.0
 
 
 def _candle_close(candle: dict) -> float:
     try:
-        return float(candle.get("close", 0))
+        return float(candle.get("c") or candle.get("close") or 0)
     except (TypeError, ValueError):
         return 0.0
 
@@ -93,12 +96,13 @@ async def detect_symbol(
 
     price = _candle_close(current)
     # Price change over the baseline window
-    base_open = float(baseline[-1].get("open", price)) if baseline else price
+    base_open = float(baseline[-1].get("o") or baseline[-1].get("open") or price) if baseline else price
     price_change_pct = ((price - base_open) / base_open * 100) if base_open else 0.0
 
+    close_time = current.get("T") or current.get("close_time") or 0
     triggered_at = datetime.fromtimestamp(
-        int(current.get("close_time", 0)) / 1000, tz=timezone.utc
-    ) if current.get("close_time") else datetime.now(timezone.utc)
+        int(close_time) / 1000, tz=timezone.utc
+    ) if close_time else datetime.now(timezone.utc)
 
     alert: dict[str, Any] = {
         "module": "radarx",

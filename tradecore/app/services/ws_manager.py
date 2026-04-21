@@ -20,6 +20,7 @@ from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.settings import UserSettings, Watchlist
 from app.services import redis_service
+from app.services.telegram_service import service as telegram_service
 
 UNREAD_BUFFER_SIZE = 20
 ALERT_MODULES = ("radarx", "whale", "gemradar", "oracle", "sentiment", "macro")
@@ -129,13 +130,15 @@ class ConnectionManager:
         event = {"type": event_type, "data": payload}
 
         symbol = payload.get("symbol") if isinstance(payload, dict) else None
-        if not self._conns:
-            return
 
         async with AsyncSessionLocal() as db:
+            # WebSocket delivery to connected users
             for user_id in list(self._conns.keys()):
                 if await self._user_should_receive(db, user_id, module, symbol):
                     await self.broadcast_to_user(user_id, event)
+
+            # Telegram delivery to all users with telegram_enabled
+            await self._deliver_telegram(db, module, payload, symbol)
 
     async def _user_should_receive(
         self, db: AsyncSession, user_id: UUID, module: str, symbol: str | None
@@ -159,6 +162,28 @@ class ConnectionManager:
             if symbol in (w.symbols or []):
                 return True
         return False
+
+
+    async def _deliver_telegram(
+        self, db: AsyncSession, module: str, payload: dict, symbol: str | None
+    ) -> None:
+        """Fan out alert to all Telegram-enabled users."""
+        if module == "liquidation":
+            return
+        result = await db.execute(
+            select(UserSettings).where(
+                UserSettings.telegram_enabled.is_(True),
+                UserSettings.telegram_chat_id.isnot(None),
+            )
+        )
+        for us in result.scalars():
+            if symbol and not await self._user_should_receive(db, us.user_id, module, symbol):
+                continue
+            try:
+                chat_id = int(us.telegram_chat_id)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            asyncio.create_task(telegram_service.send_alert(chat_id, module, payload))
 
 
 manager = ConnectionManager()

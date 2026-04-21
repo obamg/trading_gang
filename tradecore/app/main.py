@@ -1,6 +1,7 @@
 """FastAPI application entrypoint."""
 from __future__ import annotations
 
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -24,6 +25,7 @@ from app.errors import (
 from app.logging_config import configure_logging, log
 from app.rate_limit import limiter
 from app.routers import auth as auth_router
+from app.routers import settings as settings_router
 from app.routers import ws as ws_router
 from app.modules.gemradar.router import router as gemradar_router
 from app.modules.liquidmap.router import router as liquidmap_router
@@ -54,20 +56,43 @@ async def lifespan(app: FastAPI):
     # Redis + downstream services
     await redis_service.init_redis()
     await ws_manager.start_relay()
-    await binance_manager.start()
-    await telegram_service.start()
-    await liquidation_listener.start()
-    await oracle_trigger.start()
+
+    # Singleton services must only run on one worker. Use a Redis lock so the
+    # first worker to start becomes the leader; the rest skip these services.
+    r = redis_service.get_redis()
+    is_leader = await r.set("tradecore:leader", "1", nx=True, ex=300)
+    _leader_refresh: asyncio.Task | None = None
+    if is_leader:
+        async def _keep_leader():
+            try:
+                while True:
+                    await asyncio.sleep(120)
+                    await r.expire("tradecore:leader", 300)
+            except asyncio.CancelledError:
+                pass
+        _leader_refresh = asyncio.create_task(_keep_leader())
+        await binance_manager.start()
+        await telegram_service.start()
+        await liquidation_listener.start()
+        await oracle_trigger.start()
+        log.info("worker_is_leader", singletons="binance,telegram,liquidation,oracle")
+    else:
+        log.info("worker_is_follower", singletons="skipped")
+
     if settings.scheduler_enabled:
         start_scheduler()
     log.info("startup_complete", env=settings.app_env)
     yield
     if settings.scheduler_enabled:
         stop_scheduler()
-    await oracle_trigger.stop()
-    await liquidation_listener.stop()
-    await telegram_service.stop()
-    await binance_manager.stop()
+    if is_leader:
+        await oracle_trigger.stop()
+        await liquidation_listener.stop()
+        await telegram_service.stop()
+        await binance_manager.stop()
+        if _leader_refresh:
+            _leader_refresh.cancel()
+        await r.delete("tradecore:leader")
     await ws_manager.stop_relay()
     await redis_service.close_redis()
     await engine.dispose()
@@ -137,6 +162,7 @@ app.add_exception_handler(RequestValidationError, validation_error_handler)
 # ----- Routers -----
 
 app.include_router(auth_router.router)
+app.include_router(settings_router.router)
 app.include_router(ws_router.router)
 app.include_router(radarx_router)
 app.include_router(whaleradar_router)
