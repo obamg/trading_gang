@@ -19,6 +19,7 @@ import RiskCalcPage from "@/pages/dashboard/riskcalc";
 import TradeLogPage from "@/pages/dashboard/tradelog";
 import PerformancePage from "@/pages/dashboard/performance";
 import OraclePage from "@/pages/dashboard/oracle";
+import SettingsPage from "@/pages/settings";
 import LandingPage from "@/pages/landing";
 import { useAuthStore } from "@/stores/authStore";
 import { apiMe } from "@/api/auth";
@@ -96,23 +97,12 @@ export default function App() {
             <Route path="/tradelog" element={<TradeLogPage />} />
             <Route path="/performance" element={<PerformancePage />} />
             <Route path="/oracle" element={<OraclePage />} />
-            <Route path="/settings" element={<Placeholder label="Settings" />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthBootstrap>
     </BrowserRouter>
-  );
-}
-
-function Placeholder({ label }: { label: string }) {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-semibold">{label}</h1>
-      <p className="mt-2 text-sm text-textSecondary">
-        Module scaffold — implementation lands in its dedicated team build.
-      </p>
-    </div>
   );
 }
