@@ -23,10 +23,12 @@ import SettingsPage from "@/pages/settings";
 import LandingPage from "@/pages/landing";
 import { useAuthStore } from "@/stores/authStore";
 import { apiMe } from "@/api/auth";
+import { scheduleProactiveRefresh } from "@/api/client";
 import { useWebSocket } from "@/hooks/useWebSocket";
 
 function AuthBootstrap({ children }: { children: React.ReactNode }) {
-  const { accessToken, setUser, setBootstrapped, clear, bootstrapped } = useAuthStore();
+  const { accessToken, tokenExpiresAt, setUser, setBootstrapped, clear, bootstrapped } =
+    useAuthStore();
 
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +39,17 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
       }
       try {
         const me = await apiMe();
-        if (!cancelled) setUser(me);
+        if (!cancelled) {
+          setUser(me);
+          const remainingSec = tokenExpiresAt
+            ? Math.max(0, (tokenExpiresAt - Date.now()) / 1000)
+            : 0;
+          if (remainingSec > 30) {
+            scheduleProactiveRefresh(remainingSec);
+          } else {
+            scheduleProactiveRefresh(0);
+          }
+        }
       } catch {
         if (!cancelled) clear();
       } finally {
@@ -48,7 +60,7 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, bootstrapped, setUser, setBootstrapped, clear]);
+  }, [accessToken, tokenExpiresAt, bootstrapped, setUser, setBootstrapped, clear]);
 
   return <>{children}</>;
 }

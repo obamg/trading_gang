@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = "change-me-generate-with-openssl-rand-hex-32"
     jwt_algorithm: str = "HS256"
-    jwt_access_ttl_minutes: int = 15
-    jwt_refresh_ttl_days: int = 7
+    jwt_access_ttl_minutes: int = 60
+    jwt_refresh_ttl_days: int = 30
 
     # Google OAuth
     google_client_id: str = ""

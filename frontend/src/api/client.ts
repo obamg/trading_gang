@@ -19,6 +19,22 @@ http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 // One-shot refresh lock, shared across concurrent 401s
 let refreshPromise: Promise<string | null> | null = null;
+let proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function scheduleProactiveRefresh(expiresIn: number) {
+  if (proactiveRefreshTimer) clearTimeout(proactiveRefreshTimer);
+  const delayMs = expiresIn * 0.8 * 1000;
+  proactiveRefreshTimer = setTimeout(() => {
+    refreshAccessToken();
+  }, delayMs);
+}
+
+export function clearProactiveRefresh() {
+  if (proactiveRefreshTimer) {
+    clearTimeout(proactiveRefreshTimer);
+    proactiveRefreshTimer = null;
+  }
+}
 
 async function refreshAccessToken(): Promise<string | null> {
   try {
@@ -27,9 +43,11 @@ async function refreshAccessToken(): Promise<string | null> {
       access_token: string;
       expires_in: number;
     }>(`${API_URL}/auth/refresh`, {}, { withCredentials: true });
-    useAuthStore.getState().setAccessToken(data.access_token);
+    useAuthStore.getState().setAccessToken(data.access_token, data.expires_in);
+    scheduleProactiveRefresh(data.expires_in);
     return data.access_token;
   } catch {
+    clearProactiveRefresh();
     useAuthStore.getState().clear();
     return null;
   }

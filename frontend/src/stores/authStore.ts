@@ -5,8 +5,9 @@ import type { User } from "@/types/auth";
 interface AuthState {
   user: User | null;
   accessToken: string | null;
+  tokenExpiresAt: number | null;
   bootstrapped: boolean;
-  setAccessToken: (token: string) => void;
+  setAccessToken: (token: string, expiresIn?: number) => void;
   setUser: (u: User | null) => void;
   setBootstrapped: (v: boolean) => void;
   clear: () => void;
@@ -17,16 +18,24 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       accessToken: null,
+      tokenExpiresAt: null,
       bootstrapped: false,
-      setAccessToken: (token) => set({ accessToken: token }),
+      setAccessToken: (token, expiresIn?) =>
+        set({
+          accessToken: token,
+          tokenExpiresAt: expiresIn ? Date.now() + expiresIn * 1000 : null,
+        }),
       setUser: (u) => set({ user: u }),
       setBootstrapped: (v) => set({ bootstrapped: v }),
-      clear: () => set({ user: null, accessToken: null }),
+      clear: () => set({ user: null, accessToken: null, tokenExpiresAt: null }),
     }),
     {
       name: "tradecore-auth",
       storage: createJSONStorage(() => sessionStorage),
-      partialize: (state) => ({ accessToken: state.accessToken }),
+      partialize: (state) => ({
+        accessToken: state.accessToken,
+        tokenExpiresAt: state.tokenExpiresAt,
+      }),
     },
   ),
 );
