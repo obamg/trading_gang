@@ -62,6 +62,20 @@ fi
 docker compose -f docker-compose.prod.yml --env-file .env.production \
   up -d --no-deps --remove-orphans "${SERVICES[@]}"
 
+# If API was restarted but nginx wasn't in scope, restart nginx so it
+# re-resolves the upstream container IP.
+NEED_NGINX_RESTART=false
+for svc in "${SERVICES[@]}"; do
+  case "$svc" in
+    api|scheduler) NEED_NGINX_RESTART=true ;;
+    nginx) NEED_NGINX_RESTART=false; break ;;
+  esac
+done
+if $NEED_NGINX_RESTART; then
+  echo "[deploy] restarting nginx to pick up new upstream IPs"
+  docker compose -f docker-compose.prod.yml --env-file .env.production restart nginx
+fi
+
 # Wait briefly and report status.
 sleep 5
 docker compose -f docker-compose.prod.yml --env-file .env.production ps "${SERVICES[@]}"
