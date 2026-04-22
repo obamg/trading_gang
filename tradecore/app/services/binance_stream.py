@@ -245,7 +245,8 @@ class BinanceStreamManager:
             qty = float(order.get("q", 0))
         except (TypeError, ValueError):
             return
-        side = order.get("S", "").lower()
+        raw_side = order.get("S", "").upper()
+        side = "long" if raw_side == "SELL" else "short"
         usd = price * qty
         event = {
             "symbol": symbol,
