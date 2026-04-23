@@ -119,10 +119,12 @@ async def scan_oi_surges(db: AsyncSession, symbols: list[str] | None = None) -> 
 
             prev_price = float(prev.get("price", price) or price)
             price_change = ((price - prev_price) / prev_price * 100) if prev_price else 0.0
-            if change_pct > 0 and price_change > 0:
+            if change_pct > 0 and price_change >= 0:
                 direction = "long_heavy"
             elif change_pct > 0 and price_change < 0:
                 direction = "short_heavy"
+            elif change_pct < 0 and price_change < 0:
+                direction = "oi_unwind"
             else:
                 direction = "oi_unwind"
 
