@@ -3,7 +3,7 @@ import type { AlertEvent } from "@/types/alerts";
 
 type Status = "disconnected" | "connecting" | "connected" | "error";
 
-const MAX_ALERTS = 50;
+const MAX_ALERTS = 200;
 
 interface WSState {
   status: Status;

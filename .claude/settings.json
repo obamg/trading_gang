@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "hostinger": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anthropic-ai/claude-code-mcp-server",
+        "--ssh",
+        "root@187.124.221.169",
+        "--directory",
+        "/opt/trading_gang"
+      ]
+    }
+  }
+}

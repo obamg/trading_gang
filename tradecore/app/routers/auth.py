@@ -34,6 +34,9 @@ def _client_context(request: Request) -> tuple[str | None, str | None]:
     return ip, ua
 
 
+_REFRESH_COOKIE_PATH = "/api/auth" if settings.is_production else "/auth"
+
+
 def _set_refresh_cookie(response: JSONResponse | RedirectResponse, token: str) -> None:
     response.set_cookie(
         _REFRESH_COOKIE, token,
@@ -41,12 +44,12 @@ def _set_refresh_cookie(response: JSONResponse | RedirectResponse, token: str) -
         httponly=True,
         secure=settings.is_production,
         samesite="strict",
-        path="/auth",
+        path=_REFRESH_COOKIE_PATH,
     )
 
 
 def _clear_refresh_cookie(response: JSONResponse | RedirectResponse) -> None:
-    response.delete_cookie(_REFRESH_COOKIE, path="/auth")
+    response.delete_cookie(_REFRESH_COOKIE, path=_REFRESH_COOKIE_PATH)
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
