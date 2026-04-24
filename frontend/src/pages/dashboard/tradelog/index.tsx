@@ -32,16 +32,16 @@ export default function TradeLogPage() {
   const stats = computeStats(trades);
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">TradeLog — Journal &amp; manual logbook</h1>
+          <h1 className="text-lg font-semibold md:text-2xl">TradeLog — Journal &amp; manual logbook</h1>
           <p className="text-sm text-textSecondary">Every trade, setup, and note in one place.</p>
         </div>
         <Button onClick={() => setShowNew(true)}>+ New Trade</Button>
       </header>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <section className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5 md:gap-3">
         <StatCard label="Total trades" value={stats.total} />
         <StatCard label="Wins" value={stats.wins} color="text-profit" />
         <StatCard label="Losses" value={stats.losses} color="text-loss" />
@@ -139,7 +139,7 @@ function NewTradeModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   return (
     <Modal open={open} onClose={onClose} title="Log new trade" className="max-w-lg">
       <form
-        className="grid grid-cols-2 gap-3"
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2"
         onSubmit={(e) => { e.preventDefault(); mut.mutate(form); }}
       >
         <Input label="Symbol" value={form.symbol} onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))} required />
@@ -160,7 +160,7 @@ function NewTradeModal({ open, onClose, onCreated }: { open: boolean; onClose: (
         <Input label="Stop-loss" type="number" step="any" value={form.stop_loss_price ?? ""} onChange={handleNum("stop_loss_price")} />
         <Input label="Take-profit" type="number" step="any" value={form.take_profit_price ?? ""} onChange={handleNum("take_profit_price")} />
         <Input label="Setup" value={form.setup_name ?? ""} onChange={(e) => setForm((f) => ({ ...f, setup_name: e.target.value }))} />
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="mb-1.5 block text-xs font-medium text-textSecondary">Notes</label>
           <textarea
             value={form.notes ?? ""}
@@ -168,11 +168,11 @@ function NewTradeModal({ open, onClose, onCreated }: { open: boolean; onClose: (
             className="min-h-[80px] w-full rounded-md border border-borderDefault bg-bgSecondary px-3 py-2 text-sm text-textPrimary"
           />
         </div>
-        <label className="col-span-2 flex items-center gap-2 text-sm text-textSecondary">
+        <label className="sm:col-span-2 flex items-center gap-2 text-sm text-textSecondary">
           <input type="checkbox" checked={form.is_paper ?? false} onChange={(e) => setForm((f) => ({ ...f, is_paper: e.target.checked }))} />
           Paper trade
         </label>
-        <div className="col-span-2 flex justify-end gap-2">
+        <div className="sm:col-span-2 flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
           <Button type="submit" disabled={mut.isPending}>{mut.isPending ? "Saving…" : "Create"}</Button>
         </div>

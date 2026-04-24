@@ -61,7 +61,7 @@ export function Table<T>({ columns, rows, rowKey, dense, onRowClick, emptyMessag
                   key={c.key}
                   onClick={clickable ? () => toggleSort(c.key) : undefined}
                   className={cn(
-                    "px-4 py-2 text-xs font-semibold uppercase tracking-wide text-textMuted",
+                    "px-3 py-2 text-xs font-semibold uppercase tracking-wide text-textMuted sm:px-4",
                     c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : "text-left",
                     clickable && "cursor-pointer select-none hover:text-textSecondary",
                     c.className,
@@ -100,7 +100,7 @@ export function Table<T>({ columns, rows, rowKey, dense, onRowClick, emptyMessag
                   <td
                     key={c.key}
                     className={cn(
-                      "px-4",
+                      "px-3 sm:px-4",
                       c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : "text-left",
                       c.className,
                     )}

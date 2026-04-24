@@ -64,9 +64,9 @@ export default function RiskCalcPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header>
-        <h1 className="text-2xl font-semibold">RiskCalc — Position sizing</h1>
+        <h1 className="text-lg font-semibold md:text-2xl">RiskCalc — Position sizing</h1>
         <p className="text-sm text-textSecondary">Compute size, leverage, liquidation, and R:R before you click.</p>
       </header>
 
@@ -74,7 +74,7 @@ export default function RiskCalcPage() {
         <Card>
           <CardHeader><h2 className="text-sm font-semibold">Parameters</h2></CardHeader>
           <CardBody>
-            <form className="grid grid-cols-2 gap-3" onSubmit={submit}>
+            <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={submit}>
               <Input label="Symbol" value={form.symbol ?? ""} onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value }))} />
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-textSecondary">Side</label>
@@ -93,7 +93,7 @@ export default function RiskCalcPage() {
               <Input label="Stop-loss price" type="number" step="any" value={form.stop_loss_price || ""} onChange={handleNumber("stop_loss_price")} />
               <Input label="Take-profit (optional)" type="number" step="any" value={form.take_profit_price ?? ""} onChange={handleNumber("take_profit_price")} />
               <Input label="Max leverage" type="number" value={form.max_leverage ?? ""} onChange={handleNumber("max_leverage")} />
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <Button type="submit" disabled={calc.isPending}>{calc.isPending ? "Calculating…" : "Calculate"}</Button>
               </div>
             </form>

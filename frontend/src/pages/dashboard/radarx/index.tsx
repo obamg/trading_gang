@@ -60,16 +60,16 @@ export default function RadarXPage() {
   const rankedRows: Row[] = (moversData?.items ?? []).map((m, i) => ({ ...m, _rank: i + 1 }));
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">RadarX — Volume spike detection</h1>
+          <h1 className="text-lg font-semibold md:text-2xl">RadarX — Volume spike detection</h1>
           <p className="text-sm text-textSecondary">Live z-score alerts on 5-minute candles.</p>
         </div>
         <LiveIndicator />
       </header>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <section className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
         <MetricCard label="Alerts 24h" value={stats?.alerts_24h ?? null} valueDecimals={0} />
         <MetricCard label="Avg Z-Score" value={stats?.avg_z_score ?? null} />
         <MetricCard label="Top Symbol" value={null} valueSuffix={stats?.top_symbol ?? "—"} valueDecimals={0} />

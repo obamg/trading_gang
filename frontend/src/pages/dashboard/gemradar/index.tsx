@@ -20,10 +20,10 @@ export default function GemRadarPage() {
   });
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">GemRadar — Early-stage token discovery</h1>
+          <h1 className="text-lg font-semibold md:text-2xl">GemRadar — Early-stage token discovery</h1>
           <p className="text-sm text-textSecondary">Fresh pools with signal, filtered by risk profile.</p>
         </div>
         <LiveIndicator />
@@ -66,7 +66,7 @@ function GemCard({ g }: { g: GemAlert }) {
     <div className="rounded-md border border-borderSubtle bg-bgElevated p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-base font-semibold">{g.symbol}</span>
             {g.name && <span className="text-xs text-textMuted">{g.name}</span>}
             {g.chain && <Badge variant="neutral">{g.chain}</Badge>}
@@ -86,7 +86,7 @@ function GemCard({ g }: { g: GemAlert }) {
           <div className="text-xs text-textSecondary">Liq <NumberDisplay value={g.liquidity_usd ?? 0} decimals={0} prefix="$" /></div>
         </div>
       </div>
-      <div className="mt-2 flex items-center gap-4 text-xs">
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs sm:gap-4">
         <span>5m: <PercentChange value={g.price_change_5m} /></span>
         <span>1h: <PercentChange value={g.price_change_1h} /></span>
         <span>24h: <PercentChange value={g.price_change_24h} /></span>

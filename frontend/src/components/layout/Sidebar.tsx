@@ -1,22 +1,16 @@
-import { NavLink } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Settings, HelpCircle } from "lucide-react";
+import { NavLink, useLocation } from "react-router-dom";
+import { ChevronLeft, ChevronRight, Settings, HelpCircle, X } from "lucide-react";
+import { useEffect } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { cn } from "@/components/ui/cn";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { MODULES } from "./modules";
 
-export function Sidebar() {
-  const collapsed = useSettingsStore((s) => s.sidebarCollapsed);
+function SidebarContent({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const toggle = useSettingsStore((s) => s.toggleSidebar);
-  const width = collapsed ? "w-16" : "w-60";
 
   return (
-    <aside
-      className={cn(
-        "flex shrink-0 flex-col border-r border-borderSubtle bg-bgSecondary transition-[width] duration-150",
-        width,
-      )}
-    >
+    <>
       <nav className="flex flex-1 flex-col gap-1 p-2">
         {MODULES.map((m) => {
           const Icon = m.icon;
@@ -24,6 +18,7 @@ export function Sidebar() {
             <NavLink
               key={m.key}
               to={m.path}
+              onClick={onNavigate}
               className={({ isActive }) =>
                 cn(
                   "group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
@@ -58,6 +53,7 @@ export function Sidebar() {
           const link = (
             <NavLink
               to={it.to}
+              onClick={onNavigate}
               className={({ isActive }) =>
                 cn(
                   "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-textSecondary hover:bg-bgHover hover:text-textPrimary",
@@ -81,11 +77,69 @@ export function Sidebar() {
         <button
           onClick={toggle}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="mt-1 flex items-center justify-center rounded-md py-2 text-textMuted hover:bg-bgHover hover:text-textPrimary"
+          className="mt-1 hidden items-center justify-center rounded-md py-2 text-textMuted hover:bg-bgHover hover:text-textPrimary md:flex"
         >
           {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </button>
       </div>
+    </>
+  );
+}
+
+function MobileSidebar() {
+  const open = useSettingsStore((s) => s.mobileSidebarOpen);
+  const setOpen = useSettingsStore((s) => s.setMobileSidebarOpen);
+  const location = useLocation();
+
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname, setOpen]);
+
+  if (!open) return null;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setOpen(false)} />
+      <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-bgSecondary shadow-xl md:hidden">
+        <div className="flex items-center justify-between border-b border-borderSubtle px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-6 rounded-sm bg-primary-500" />
+            <span className="text-sm font-bold tracking-wide">TradeCore</span>
+          </div>
+          <button
+            onClick={() => setOpen(false)}
+            className="rounded-md p-1.5 text-textSecondary hover:bg-bgHover hover:text-textPrimary"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        <SidebarContent collapsed={false} onNavigate={() => setOpen(false)} />
+      </aside>
+    </>
+  );
+}
+
+function DesktopSidebar() {
+  const collapsed = useSettingsStore((s) => s.sidebarCollapsed);
+  const width = collapsed ? "w-16" : "w-60";
+
+  return (
+    <aside
+      className={cn(
+        "hidden shrink-0 flex-col border-r border-borderSubtle bg-bgSecondary transition-[width] duration-150 md:flex",
+        width,
+      )}
+    >
+      <SidebarContent collapsed={collapsed} />
     </aside>
+  );
+}
+
+export function Sidebar() {
+  return (
+    <>
+      <DesktopSidebar />
+      <MobileSidebar />
+    </>
   );
 }

@@ -42,10 +42,10 @@ export default function OraclePage() {
   });
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Oracle — Meta-signal aggregator</h1>
+          <h1 className="text-lg font-semibold md:text-2xl">Oracle — Meta-signal aggregator</h1>
           <p className="text-sm text-textSecondary">6-module confluence with direction, confidence, and trade plan.</p>
         </div>
         <LiveIndicator />
@@ -55,7 +55,7 @@ export default function OraclePage() {
         className="flex items-end gap-2"
         onSubmit={(e) => { e.preventDefault(); setSymbol(pending.toUpperCase()); }}
       >
-        <Input label="Symbol" value={pending} onChange={(e) => setPending(e.target.value)} className="w-48" />
+        <Input label="Symbol" value={pending} onChange={(e) => setPending(e.target.value)} className="w-full sm:w-48" />
         <Button type="submit" variant="secondary">Analyze</Button>
         <Button type="button" onClick={() => gen.mutate()} disabled={gen.isPending}>
           {gen.isPending ? "Generating…" : "Generate signal"}
@@ -77,7 +77,7 @@ export default function OraclePage() {
         </Card>
       </div>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <section className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
         <MetricCard label="Signals generated" value={perf?.total_signals ?? null} valueDecimals={0} />
         <MetricCard label="1h accuracy" value={perf?.accuracy_1h_pct ?? null} valueSuffix="%" valueDecimals={1} />
         <MetricCard label="4h accuracy" value={perf?.accuracy_4h_pct ?? null} valueSuffix="%" valueDecimals={1} />
@@ -144,7 +144,7 @@ function ModuleBars({ live }: { live: LiveOracle }) {
         const width = Math.min(100, Math.abs(contrib) * 2);
         const color = contrib > 0 ? "bg-profit/60" : contrib < 0 ? "bg-loss/60" : "bg-borderSubtle";
         return (
-          <div key={mod} className="grid grid-cols-[120px_1fr_80px] items-center gap-3 text-xs">
+          <div key={mod} className="grid grid-cols-[80px_1fr_50px] items-center gap-2 text-xs sm:grid-cols-[120px_1fr_80px] sm:gap-3">
             <span className="font-semibold capitalize">{mod}</span>
             <div className="relative h-4 rounded bg-bgElevated overflow-hidden">
               <div className={`h-full ${contrib >= 0 ? "ml-1/2" : "mr-1/2"}`} style={{
@@ -168,8 +168,8 @@ function ModuleBars({ live }: { live: LiveOracle }) {
 function SignalRow({ s, onTrade }: { s: OracleSignal; onTrade: () => void }) {
   const meta = RECOMMENDATION_META[s.recommendation] ?? RECOMMENDATION_META.neutral;
   return (
-    <div className="flex items-center justify-between rounded-md border border-borderSubtle bg-bgElevated px-3 py-2">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-2 rounded-md border border-borderSubtle bg-bgElevated px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
         <span className="font-semibold">{s.symbol}</span>
         <span className={`text-xs font-semibold ${meta.color}`}>{meta.label}</span>
         <Badge variant={s.confidence === "high" ? "bullish" : s.confidence === "medium" ? "warning" : "neutral"}>
@@ -177,7 +177,7 @@ function SignalRow({ s, onTrade }: { s: OracleSignal; onTrade: () => void }) {
         </Badge>
         <span className="text-xs text-textMuted">{s.confluence_count} modules</span>
       </div>
-      <div className="flex items-center gap-3 text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-xs sm:gap-3">
         <span className="font-semibold tabular-nums">{s.score.toFixed(0)}</span>
         {s.entry_price && <span className="text-textMuted">E: <NumberDisplay value={s.entry_price} decimals={4} /></span>}
         {s.rr_ratio && <span className="text-textMuted">R:R {s.rr_ratio.toFixed(2)}</span>}

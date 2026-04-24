@@ -13,13 +13,13 @@ export default function SentimentPage() {
   const { data: ls, isLoading: lsL } = useQuery({ queryKey: ["sentiment", "ls"], queryFn: () => sentimentApi.longShort(30) });
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header>
-        <h1 className="text-2xl font-semibold">SentimentPulse — Crowd positioning</h1>
+        <h1 className="text-lg font-semibold md:text-2xl">SentimentPulse — Crowd positioning</h1>
         <p className="text-sm text-textSecondary">Funding, long/short ratio, and macro sentiment gauges.</p>
       </header>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-3">
+      <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 md:gap-3">
         <MetricCard label="Fear &amp; Greed" value={overview?.fear_greed_index ?? null} valueDecimals={0} valueSuffix={overview?.fear_greed_label ? ` · ${overview.fear_greed_label}` : ""} />
         <MetricCard label="BTC Dominance" value={overview?.btc_dominance_pct ?? null} valueSuffix="%" />
         <MetricCard label="Total Market Cap" value={overview?.total_mcap_usd ?? null} valuePrefix="$" valueDecimals={0} />
@@ -86,7 +86,7 @@ function LSTable({ rows }: { rows: FundingRow[] }) {
         const extreme = long >= 65 || short >= 65;
         return (
           <div className="flex items-center gap-2">
-            <div className="relative h-4 w-40 overflow-hidden rounded bg-bgElevated">
+            <div className="relative h-4 w-24 overflow-hidden rounded bg-bgElevated sm:w-40">
               <div className="absolute inset-y-0 left-0 bg-profit/60" style={{ width: `${long}%` }} />
               <div className="absolute inset-y-0 right-0 bg-loss/60" style={{ width: `${short}%` }} />
             </div>

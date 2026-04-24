@@ -9,15 +9,15 @@ export default function Dashboard() {
   const alerts = useAlerts();
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">Command center</h1>
+        <h1 className="text-lg font-semibold md:text-2xl">Command center</h1>
         <p className="text-sm text-textSecondary">
           Live alerts across every module, in one place.
         </p>
       </header>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <section className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5 md:gap-3">
         {MODULES.map((m) => {
           const Icon = m.icon;
           return (

@@ -21,16 +21,16 @@ export function Modal({ open, onClose, title, className, children }: PropsWithCh
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className={cn(
-          "relative w-full max-w-md rounded-xl border border-borderSubtle bg-bgElevated shadow-card",
+          "relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-borderSubtle bg-bgElevated shadow-card",
           "animate-slideDown",
           className,
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-borderSubtle px-5 py-3">
+        <div className="flex items-center justify-between border-b border-borderSubtle px-4 py-3 sm:px-5">
           <h3 className="text-md font-semibold">{title}</h3>
           <button
             onClick={onClose}
@@ -40,7 +40,7 @@ export function Modal({ open, onClose, title, className, children }: PropsWithCh
             <X size={18} />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-4 sm:p-5">{children}</div>
       </div>
     </div>
   );

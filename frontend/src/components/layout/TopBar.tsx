@@ -1,7 +1,8 @@
-import { LogOut } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import { NotificationCenter } from "./NotificationCenter";
 import { useMacroStore } from "@/stores/macroStore";
 import { useAuthStore } from "@/stores/authStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { apiLogout } from "@/api/auth";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
@@ -9,7 +10,7 @@ import { useWebSocketStore } from "@/stores/webSocketStore";
 
 function MacroMetric({ label, value, decimals = 2, suffix }: { label: string; value: number | null; decimals?: number; suffix?: string }) {
   return (
-    <div className="flex items-center gap-2 px-3 border-r border-borderSubtle last:border-r-0">
+    <div className="flex items-center gap-2 border-r border-borderSubtle px-3 last:border-r-0">
       <span className="text-[10px] font-semibold uppercase tracking-wider text-textMuted">{label}</span>
       <NumberDisplay value={value} decimals={decimals} suffix={suffix} className="text-sm" />
     </div>
@@ -21,6 +22,7 @@ export function TopBar() {
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
   const wsStatus = useWebSocketStore((s) => s.status);
+  const setMobileSidebarOpen = useSettingsStore((s) => s.setMobileSidebarOpen);
 
   async function logout() {
     try {
@@ -34,8 +36,15 @@ export function TopBar() {
   }
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-borderSubtle bg-bgSecondary px-4">
-      <div className="flex items-center gap-4">
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-borderSubtle bg-bgSecondary px-3 md:px-4">
+      <div className="flex items-center gap-3 md:gap-4">
+        <button
+          onClick={() => setMobileSidebarOpen(true)}
+          aria-label="Open menu"
+          className="rounded-md p-1.5 text-textSecondary hover:bg-bgHover hover:text-textPrimary md:hidden"
+        >
+          <Menu size={20} />
+        </button>
         <div className="flex items-center gap-2">
           <div className="h-6 w-6 rounded-sm bg-primary-500" />
           <span className="text-sm font-bold tracking-wide">TradeCore</span>
@@ -52,9 +61,9 @@ export function TopBar() {
         <MacroMetric label="FED" value={metrics.fed_rate_pct} decimals={2} suffix="%" />
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 md:gap-3">
         <NotificationCenter />
-        <div className="flex items-center gap-2">
+        <div className="hidden items-center gap-2 sm:flex">
           <div className="h-7 w-7 rounded-full bg-primary-subtle text-center text-xs font-semibold leading-7 text-primary-400">
             {(user?.email?.[0] ?? "?").toUpperCase()}
           </div>

@@ -18,9 +18,9 @@ export default function MacroPage() {
     macroScore < -20 ? "text-loss" : "text-warning";
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header>
-        <h1 className="text-2xl font-semibold">MacroPulse — Traditional market context</h1>
+        <h1 className="text-lg font-semibold md:text-2xl">MacroPulse — Traditional market context</h1>
         <p className="text-sm text-textSecondary">DXY, yields, VIX, ETF flows, and the macro regime.</p>
       </header>
 
@@ -47,7 +47,7 @@ export default function MacroPage() {
 
         <div className="lg:col-span-2">
           {sL ? <Skeleton className="h-64" /> : (
-            <section className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 md:gap-3">
               <MetricCard label="DXY" value={snap?.dxy ?? null} valueDecimals={2} />
               <MetricCard label="US 10Y" value={snap?.us10y ?? null} valueSuffix="%" valueDecimals={2} />
               <MetricCard label="VIX" value={snap?.vix ?? null} valueDecimals={2} />
@@ -66,8 +66,8 @@ export default function MacroPage() {
             <p className="text-sm text-textSecondary">No scheduled events.</p>
           ) : (
             (cal?.items ?? []).map((e) => (
-              <div key={e.id} className="flex items-center justify-between rounded-md border border-borderSubtle bg-bgElevated px-3 py-2">
-                <div className="flex items-center gap-2">
+              <div key={e.id} className="flex flex-col gap-1 rounded-md border border-borderSubtle bg-bgElevated px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
                   {e.impact && (
                     <Badge variant={e.impact === "high" ? "bearish" : e.impact === "medium" ? "warning" : "neutral"}>
                       {e.impact.toUpperCase()}
@@ -76,7 +76,7 @@ export default function MacroPage() {
                   <span className="font-semibold">{e.name}</span>
                   {e.country && <span className="text-xs text-textMuted">· {e.country}</span>}
                 </div>
-                <div className="flex items-center gap-3 text-xs text-textSecondary">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-textSecondary sm:gap-3">
                   {e.forecast && <span>Forecast: <NumberDisplay value={Number(e.forecast)} decimals={2} /></span>}
                   {e.previous && <span>Prev: <NumberDisplay value={Number(e.previous)} decimals={2} /></span>}
                   <span className="text-textMuted">{new Date(e.scheduled_at).toLocaleString()}</span>

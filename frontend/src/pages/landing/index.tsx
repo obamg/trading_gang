@@ -19,14 +19,14 @@ export default function LandingPage() {
 function Header() {
   return (
     <header className="sticky top-0 z-30 border-b border-borderSubtle bg-bgPrimary/80 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
         <Link to="/" className="text-lg font-bold tracking-tight">
           TradeCore<span className="text-accent">.</span>
         </Link>
-        <nav className="flex items-center gap-5 text-sm">
-          <a href="#modules" className="text-textSecondary hover:text-textPrimary">Modules</a>
-          <a href="#how" className="text-textSecondary hover:text-textPrimary">How it works</a>
-          <a href="#pricing" className="text-textSecondary hover:text-textPrimary">Pricing</a>
+        <nav className="flex items-center gap-3 text-sm sm:gap-5">
+          <a href="#modules" className="hidden text-textSecondary hover:text-textPrimary sm:inline">Modules</a>
+          <a href="#how" className="hidden text-textSecondary hover:text-textPrimary sm:inline">How it works</a>
+          <a href="#pricing" className="hidden text-textSecondary hover:text-textPrimary md:inline">Pricing</a>
           <Link to="/login" className="text-textSecondary hover:text-textPrimary">Log in</Link>
           <Link
             to="/register"
@@ -53,7 +53,7 @@ function Hero() {
           backgroundSize: "40px 40px",
         }}
       />
-      <div className="relative mx-auto max-w-5xl px-6 py-28 text-center">
+      <div className="relative mx-auto max-w-5xl px-4 py-16 text-center sm:px-6 md:py-28">
         <span className="mb-4 inline-block rounded-full border border-borderSubtle bg-bgElevated px-3 py-1 text-xs text-textSecondary">
           Pro-grade crypto intelligence · Built for traders
         </span>
@@ -100,7 +100,7 @@ const MODULE_BLURBS: Record<string, string> = {
 function ModulesShowcase() {
   return (
     <section id="modules" className="border-b border-borderSubtle">
-      <div className="mx-auto max-w-6xl px-6 py-20">
+      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 md:py-20">
         <h2 className="mb-3 text-center text-3xl font-bold">All ten modules, one cockpit</h2>
         <p className="mx-auto mb-12 max-w-2xl text-center text-textSecondary">
           Each module is specialised, fast, and opinionated. They don't just stream data —
@@ -141,7 +141,7 @@ function HowItWorks() {
   ];
   return (
     <section id="how" className="border-b border-borderSubtle bg-bgElevated/40">
-      <div className="mx-auto max-w-5xl px-6 py-20">
+      <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 md:py-20">
         <h2 className="mb-12 text-center text-3xl font-bold">How it works</h2>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           {steps.map((s) => (
@@ -193,7 +193,7 @@ const PLANS = [
 function Pricing() {
   return (
     <section id="pricing" className="border-b border-borderSubtle">
-      <div className="mx-auto max-w-6xl px-6 py-20">
+      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 md:py-20">
         <h2 className="mb-3 text-center text-3xl font-bold">Simple, honest pricing</h2>
         <p className="mx-auto mb-12 max-w-2xl text-center text-textSecondary">
           Cancel anytime. Every plan includes read-only exchange links — we never take custody of funds.
@@ -249,7 +249,7 @@ function SocialProof() {
   ];
   return (
     <section className="border-b border-borderSubtle bg-bgElevated/40">
-      <div className="mx-auto max-w-5xl px-6 py-20 text-center">
+      <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 md:py-20 text-center">
         <h2 className="mb-3 text-3xl font-bold">Join traders already using TradeCore</h2>
         <p className="mb-12 text-textSecondary">From solo discretionary traders to prop desks.</p>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
@@ -271,7 +271,7 @@ function SocialProof() {
 function Footer() {
   return (
     <footer className="bg-bgPrimary">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 md:flex-row">
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 py-10 sm:px-6 md:flex-row">
         <div className="text-sm text-textMuted">
           TradeCore<span className="text-accent">.</span> © {new Date().getFullYear()}
         </div>

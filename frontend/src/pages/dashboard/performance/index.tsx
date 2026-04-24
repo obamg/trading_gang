@@ -29,10 +29,10 @@ export default function PerformancePage() {
   const snap: PerfSnap | undefined = overview?.[period];
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">PerformanceCore — Trading analytics</h1>
+          <h1 className="text-lg font-semibold md:text-2xl">PerformanceCore — Trading analytics</h1>
           <p className="text-sm text-textSecondary">Win rate, expectancy, equity curve, signal accuracy.</p>
         </div>
         <label className="flex items-center gap-2 text-sm text-textSecondary">
@@ -52,7 +52,7 @@ export default function PerformancePage() {
       />
 
       {oL ? <Skeleton className="h-28" /> : (
-        <section className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
+        <section className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 md:gap-3 lg:grid-cols-6">
           <MetricCard label="Total trades" value={snap?.total_trades ?? null} valueDecimals={0} />
           <MetricCard label="Win rate" value={snap?.win_rate ?? null} valueSuffix="%" valueDecimals={1} />
           <MetricCard label="Expectancy" value={snap?.expectancy ?? null} valueSuffix="R" valueDecimals={2} />
@@ -92,7 +92,7 @@ export default function PerformancePage() {
         <CardHeader><h2 className="text-sm font-semibold">Oracle signal accuracy</h2></CardHeader>
         <CardBody>
           {!sigPerf ? <Skeleton className="h-16" /> : (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
               <MetricCard label="Total signals" value={sigPerf.total_signals} valueDecimals={0} />
               <MetricCard label="1h accuracy" value={sigPerf.accuracy_1h_pct} valueSuffix="%" valueDecimals={1} />
               <MetricCard label="4h accuracy" value={sigPerf.accuracy_4h_pct} valueSuffix="%" valueDecimals={1} />

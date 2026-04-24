@@ -32,10 +32,10 @@ export default function LiquidMapPage() {
   }, [heatmap]);
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">LiquidMap — Liquidation heatmap</h1>
+          <h1 className="text-lg font-semibold md:text-2xl">LiquidMap — Liquidation heatmap</h1>
           <p className="text-sm text-textSecondary">Where leverage is concentrated and likely to unwind.</p>
         </div>
         <LiveIndicator />
@@ -45,11 +45,11 @@ export default function LiquidMapPage() {
         className="flex items-end gap-2"
         onSubmit={(e) => { e.preventDefault(); setSymbol(pending.toUpperCase()); }}
       >
-        <Input label="Symbol" value={pending} onChange={(e) => setPending(e.target.value)} className="w-48" />
+        <Input label="Symbol" value={pending} onChange={(e) => setPending(e.target.value)} className="w-full sm:w-48" />
         <Button type="submit" variant="secondary">Load</Button>
       </form>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <section className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
         <MetricCard label="Long liquidations 24h" value={stats?.long_usd_24h ?? null} valuePrefix="$" valueDecimals={0} />
         <MetricCard label="Short liquidations 24h" value={stats?.short_usd_24h ?? null} valuePrefix="$" valueDecimals={0} />
         <MetricCard label="Net bias" value={stats?.net_usd_24h ?? null} valuePrefix="$" valueDecimals={0} />
@@ -103,7 +103,7 @@ function HeatmapViz({ levels, maxSize }: { levels: HeatmapLevel[]; maxSize: numb
         const pct = (lv.size_usd / maxSize) * 100;
         const isLong = lv.side === "long";
         return (
-          <div key={`${lv.side}-${lv.price}-${i}`} className="grid grid-cols-[80px_1fr_80px] items-center gap-2 text-xs">
+          <div key={`${lv.side}-${lv.price}-${i}`} className="grid grid-cols-[50px_1fr_50px] items-center gap-1 text-xs sm:grid-cols-[80px_1fr_80px] sm:gap-2">
             <span className="text-right text-textMuted tabular-nums">{isLong ? "LONG" : "SHORT"}</span>
             <div className="relative h-6 bg-bgElevated rounded overflow-hidden">
               <div

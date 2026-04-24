@@ -101,7 +101,7 @@ export function NotificationCenter() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-lg border border-borderSubtle bg-bgCard shadow-xl">
+        <div className="fixed inset-x-3 top-14 z-50 overflow-hidden rounded-lg border border-borderSubtle bg-bgCard shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80">
           <div className="flex items-center justify-between border-b border-borderSubtle px-4 py-2.5">
             <span className="text-sm font-semibold">Notifications</span>
             {alerts.length > 0 && (
