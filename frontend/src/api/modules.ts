@@ -20,6 +20,8 @@ export interface RadarXAlert {
   price: number;
   price_change_pct: number | null;
   volume_24h_usd: number | null;
+  is_divergence?: boolean;
+  divergence_score?: number;
   triggered_at: string;
 }
 export interface TopMover {

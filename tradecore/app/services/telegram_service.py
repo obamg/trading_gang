@@ -201,11 +201,15 @@ class TelegramService:
     def _format_alert(self, module: str, d: dict) -> str:
         sym = d.get("symbol", "?")
         if module == "radarx":
+            is_div = d.get("is_divergence", False)
+            header = f"⚡ *DIVERGENCE — {sym}*" if is_div else f"🚨 *RadarX Alert — {sym}*"
+            div_line = f"\nDiv Score: `{d.get('divergence_score', '?')}` — volume loading, price flat" if is_div else ""
             return (
-                f"🚨 *RadarX Alert — {sym}*\n"
+                f"{header}\n"
                 f"Z-Score: `{d.get('z_score', '?')}` | Ratio: `{d.get('ratio', '?')}×`\n"
                 f"Volume: `${_fmt_usd(d.get('candle_volume_usd'))}` | "
                 f"Price: `{_fmt_pct(d.get('price_change_pct'))}`"
+                f"{div_line}"
             )
         if module == "whale":
             return (

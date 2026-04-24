@@ -25,6 +25,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { apiMe } from "@/api/auth";
 import { scheduleProactiveRefresh } from "@/api/client";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useNotifications } from "@/hooks/useNotifications";
 
 function AuthBootstrap({ children }: { children: React.ReactNode }) {
   const { accessToken, tokenExpiresAt, setUser, setBootstrapped, clear, bootstrapped } =
@@ -67,6 +68,7 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
 
 function WebSocketMount() {
   useWebSocket();
+  useNotifications();
   return null;
 }
 

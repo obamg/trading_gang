@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { requestNotificationPermission } from "@/hooks/useNotifications";
 import {
   apiGetSettings,
   apiUpdateSettings,
@@ -117,12 +119,49 @@ export default function SettingsPage() {
     setTgToken(token);
   }
 
+  const browserNotifs = useSettingsStore((s) => s.browserNotifications);
+  const soundAlerts = useSettingsStore((s) => s.soundAlerts);
+  const setBrowserNotifs = useSettingsStore((s) => s.setBrowserNotifications);
+  const setSoundAlerts = useSettingsStore((s) => s.setSoundAlerts);
+
+  async function handleBrowserNotifToggle(enabled: boolean) {
+    if (enabled) {
+      const granted = await requestNotificationPermission();
+      if (!granted) return;
+    }
+    setBrowserNotifs(enabled);
+  }
+
   if (isLoading) return <div className="p-6"><Skeleton className="h-64" /></div>;
   if (!settings) return null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
       <h1 className="text-2xl font-semibold">Settings</h1>
+
+      {/* Browser Notifications */}
+      <Card>
+        <CardHeader>Divergence Alerts</CardHeader>
+        <CardBody>
+          <div className="divide-y divide-borderSubtle">
+            <Toggle
+              label="Browser notifications"
+              description="Desktop push when a volume divergence is detected (volume spike + flat price)"
+              checked={browserNotifs}
+              onChange={handleBrowserNotifToggle}
+            />
+            <Toggle
+              label="Sound alerts"
+              description="Play an alert tone for divergences even when the tab is in background"
+              checked={soundAlerts}
+              onChange={setSoundAlerts}
+            />
+          </div>
+          <p className="mt-3 text-xs text-textMuted">
+            Divergence = Z-score &ge; 3 with price move &lt; 1%. These fire in real-time via WebSocket — no page refresh needed.
+          </p>
+        </CardBody>
+      </Card>
 
       {/* Telegram */}
       <Card>

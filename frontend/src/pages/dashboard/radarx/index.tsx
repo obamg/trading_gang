@@ -16,13 +16,15 @@ import { MODULE_BY_KEY } from "@/components/layout/modules";
 
 type FeedFilter = "all" | "divergence";
 
-function divergenceScore(a: RadarXAlert): number {
+function getDivergenceScore(a: RadarXAlert): number {
+  if (a.divergence_score != null) return a.divergence_score;
   const absPct = Math.abs(a.price_change_pct ?? 0);
   if (absPct === 0) return a.z_score * 100;
   return a.z_score / absPct;
 }
 
 function isDivergence(a: RadarXAlert): boolean {
+  if (a.is_divergence != null) return a.is_divergence;
   const absPct = Math.abs(a.price_change_pct ?? 0);
   return a.z_score >= 3 && absPct < 1;
 }
@@ -56,6 +58,8 @@ export default function RadarXPage() {
       price: (a.data?.price as number) ?? 0,
       price_change_pct: (a.data?.price_change_pct as number) ?? null,
       volume_24h_usd: (a.data?.volume_24h_usd as number) ?? null,
+      is_divergence: (a.data?.is_divergence as boolean) ?? undefined,
+      divergence_score: (a.data?.divergence_score as number) ?? undefined,
       triggered_at: (a.data?.triggered_at as string) ?? new Date(a.receivedAt ?? Date.now()).toISOString(),
     }));
     const map = new Map<string, RadarXAlert>();
@@ -67,7 +71,7 @@ export default function RadarXPage() {
 
   const filtered = useMemo(() => {
     if (filter === "all") return combined;
-    return combined.filter(isDivergence).sort((a, b) => divergenceScore(b) - divergenceScore(a));
+    return combined.filter(isDivergence).sort((a, b) => getDivergenceScore(b) - getDivergenceScore(a));
   }, [combined, filter]);
 
   const divergenceCount = useMemo(() => combined.filter(isDivergence).length, [combined]);
@@ -137,7 +141,7 @@ export default function RadarXPage() {
                       {" · "}Ratio <NumberDisplay value={a.ratio} decimals={2} suffix="x" />
                       {" · "}Price <NumberDisplay value={a.price} decimals={4} />
                       {a.price_change_pct != null ? <> {" · "}<PercentChange value={a.price_change_pct} /></> : null}
-                      {filter === "divergence" && <span className="ml-1.5 text-warning">· Div {divergenceScore(a).toFixed(1)}</span>}
+                      {filter === "divergence" && <span className="ml-1.5 text-warning">· Div {getDivergenceScore(a).toFixed(1)}</span>}
                     </span>
                   }
                   chartUrl={`https://www.tradingview.com/chart/?symbol=BINANCE:${a.symbol}.P`}

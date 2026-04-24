@@ -25,6 +25,7 @@ DEFAULT_Z_THRESHOLD = 3.0
 DEFAULT_RATIO_THRESHOLD = 4.0
 DEFAULT_MIN_VOLUME_24H = 10_000_000.0
 COOLDOWN_MINUTES = 30
+DIVERGENCE_MAX_PRICE_PCT = 1.0
 
 
 def _candle_quote_volume(candle: dict) -> float:
@@ -104,6 +105,10 @@ async def detect_symbol(
         int(close_time) / 1000, tz=timezone.utc
     ) if close_time else datetime.now(timezone.utc)
 
+    abs_pct = abs(price_change_pct)
+    is_divergence = z_score >= DEFAULT_Z_THRESHOLD and abs_pct < DIVERGENCE_MAX_PRICE_PCT
+    div_score = round(z_score / abs_pct, 1) if abs_pct > 0 else round(z_score * 100, 1)
+
     alert: dict[str, Any] = {
         "module": "radarx",
         "symbol": symbol,
@@ -114,6 +119,8 @@ async def detect_symbol(
         "price": price,
         "price_change_pct": round(price_change_pct, 2),
         "volume_24h_usd": volume_24h_usd,
+        "is_divergence": is_divergence,
+        "divergence_score": div_score if is_divergence else None,
         "triggered_at": triggered_at.isoformat(),
         "tradingview_url": f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
     }
