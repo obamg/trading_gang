@@ -1,4 +1,14 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(npx vite *)",
+      "Bash(ssh -o ConnectTimeout=10 root@187.124.221.169 \"cd /opt/trading_gang && git pull origin main 2>&1 | tail -5\")",
+      "Bash(scp \"/Users/mariusokouin/Documents/Claude/Projects/trading gang/frontend/src/pages/dashboard/whaleradar/index.tsx\" root@187.124.221.169:/opt/trading_gang/frontend/src/pages/dashboard/whaleradar/index.tsx)",
+      "Bash(ssh -o ConnectTimeout=10 root@187.124.221.169 \"cd /opt/trading_gang && set -a && source .env.production 2>/dev/null; set +a && docker compose -f docker-compose.prod.yml build --no-cache frontend 2>&1 | tail -10\")",
+      "Bash(ssh -o ConnectTimeout=10 root@187.124.221.169 \"cd /opt/trading_gang && set -a && source .env.production 2>/dev/null; set +a && docker compose -f docker-compose.prod.yml up -d frontend nginx 2>&1 && sleep 5 && docker compose -f docker-compose.prod.yml ps frontend nginx --format 'table {{.Name}}\\\\t{{.Status}}'\")",
+      "Bash(ssh -o ConnectTimeout=10 root@187.124.221.169 \"curl -so /dev/null -w '%{http_code}' -k -H 'Host: formationdouane.online' https://localhost/assets/index-BQfuxaV3.css && echo ' CSS' && curl -so /dev/null -w '%{http_code}' -k -H 'Host: formationdouane.online' https://localhost/assets/index-CIIAEBJH.js && echo ' JS'\")"
+    ]
+  },
   "mcpServers": {
     "hostinger": {
       "command": "npx",

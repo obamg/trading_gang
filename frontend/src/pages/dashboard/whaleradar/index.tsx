@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Search } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Tabs } from "@/components/ui/Tabs";
 import { Table, type Column } from "@/components/ui/Table";
@@ -16,6 +17,7 @@ type TabKey = "trades" | "oi" | "onchain";
 
 export default function WhaleRadarPage() {
   const [tab, setTab] = useState<TabKey>("trades");
+  const [filter, setFilter] = useState("");
   const { data: trades, isLoading: tL } = useQuery({
     queryKey: ["whale", "trades"], queryFn: () => whaleApi.trades({ hours: 6 }),
   });
@@ -25,6 +27,11 @@ export default function WhaleRadarPage() {
   const { data: chain, isLoading: cL } = useQuery({
     queryKey: ["whale", "chain"], queryFn: () => whaleApi.onchain({ hours: 12 }),
   });
+
+  const q = filter.toUpperCase();
+  const filteredTrades = useMemo(() => (trades?.items ?? []).filter((r) => !q || r.symbol.includes(q)), [trades, q]);
+  const filteredOI = useMemo(() => (oi?.items ?? []).filter((r) => !q || r.symbol.includes(q)), [oi, q]);
+  const filteredChain = useMemo(() => (chain?.items ?? []).filter((r) => !q || r.asset.includes(q)), [chain, q]);
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">
@@ -38,20 +45,32 @@ export default function WhaleRadarPage() {
 
       <Card>
         <CardHeader>
-          <Tabs
-            tabs={[
-              { key: "trades", label: `Large Trades (${trades?.items.length ?? 0})` },
-              { key: "oi", label: `OI Surges (${oi?.items.length ?? 0})` },
-              { key: "onchain", label: `On-Chain (${chain?.items.length ?? 0})` },
-            ]}
-            active={tab}
-            onChange={(k) => setTab(k as TabKey)}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full">
+            <Tabs
+              tabs={[
+                { key: "trades", label: `Large Trades (${filteredTrades.length})` },
+                { key: "oi", label: `OI Surges (${filteredOI.length})` },
+                { key: "onchain", label: `On-Chain (${filteredChain.length})` },
+              ]}
+              active={tab}
+              onChange={(k) => setTab(k as TabKey)}
+            />
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-textMuted" />
+              <input
+                type="text"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter symbol..."
+                className="w-full sm:w-48 rounded-md border border-borderSubtle bg-bgSecondary pl-8 pr-3 py-1.5 text-sm text-textPrimary placeholder:text-textMuted focus:border-primary-500 focus:outline-none"
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardBody className="p-0">
-          {tab === "trades" && (tL ? <Skeleton className="m-4 h-48" /> : <TradesTable rows={trades?.items ?? []} />)}
-          {tab === "oi" && (oL ? <Skeleton className="m-4 h-48" /> : <OITable rows={oi?.items ?? []} />)}
-          {tab === "onchain" && (cL ? <Skeleton className="m-4 h-48" /> : <ChainTable rows={chain?.items ?? []} />)}
+          {tab === "trades" && (tL ? <Skeleton className="m-4 h-48" /> : <TradesTable rows={filteredTrades} />)}
+          {tab === "oi" && (oL ? <Skeleton className="m-4 h-48" /> : <OITable rows={filteredOI} />)}
+          {tab === "onchain" && (cL ? <Skeleton className="m-4 h-48" /> : <ChainTable rows={filteredChain} />)}
         </CardBody>
       </Card>
     </div>
