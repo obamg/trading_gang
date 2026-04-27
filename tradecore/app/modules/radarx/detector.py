@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as app_settings
@@ -125,7 +126,16 @@ async def detect_symbol(
         "tradingview_url": f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
     }
 
-    # Persist
+    # Dedup: skip if an alert with the same symbol+triggered_at already exists
+    existing = await db.execute(
+        select(RadarXAlert.id)
+        .where(RadarXAlert.symbol == symbol, RadarXAlert.triggered_at == triggered_at)
+        .limit(1)
+    )
+    if existing.scalar_one_or_none() is not None:
+        await redis_service.set_alert_cooldown("radarx", symbol, COOLDOWN_MINUTES)
+        return None
+
     row = RadarXAlert(
         symbol=symbol,
         timeframe="5m",
