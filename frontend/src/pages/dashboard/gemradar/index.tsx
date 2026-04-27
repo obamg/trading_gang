@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Tabs } from "@/components/ui/Tabs";
@@ -7,6 +7,7 @@ import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { PercentChange } from "@/components/ui/PercentChange";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { gemApi, type GemAlert } from "@/api/modules";
 
 type Risk = "all" | "low" | "medium" | "high";
@@ -19,6 +20,11 @@ export default function GemRadarPage() {
     refetchInterval: 30000,
   });
 
+  const lastUpdated = useMemo(() => {
+    const items = data?.items ?? [];
+    return items.length ? new Date(items[0].detected_at) : null;
+  }, [data]);
+
   return (
     <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
@@ -26,7 +32,10 @@ export default function GemRadarPage() {
           <h1 className="text-lg font-semibold md:text-2xl">GemRadar — Early-stage token discovery</h1>
           <p className="text-sm text-textSecondary">Fresh pools with signal, filtered by risk profile.</p>
         </div>
-        <LiveIndicator />
+        <div className="flex flex-col items-end gap-1">
+          <LiveIndicator />
+          <LastUpdated date={lastUpdated} />
+        </div>
       </header>
 
       <Card>

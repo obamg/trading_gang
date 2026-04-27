@@ -9,6 +9,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { oracleApi, type LiveOracle, type OracleSignal } from "@/api/modules";
 
 const RECOMMENDATION_META: Record<string, { color: string; label: string }> = {
@@ -41,6 +42,11 @@ export default function OraclePage() {
     onSuccess: () => refetchLive(),
   });
 
+  const lastUpdated = useMemo(() => {
+    const items = signals?.items ?? [];
+    return items.length ? new Date(items[0].signal_at) : null;
+  }, [signals]);
+
   return (
     <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
@@ -48,7 +54,10 @@ export default function OraclePage() {
           <h1 className="text-lg font-semibold md:text-2xl">Oracle — Meta-signal aggregator</h1>
           <p className="text-sm text-textSecondary">6-module confluence with direction, confidence, and trade plan.</p>
         </div>
-        <LiveIndicator />
+        <div className="flex flex-col items-end gap-1">
+          <LiveIndicator />
+          <LastUpdated date={lastUpdated} label="Last signal" />
+        </div>
       </header>
 
       <form

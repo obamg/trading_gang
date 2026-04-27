@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { PercentChange } from "@/components/ui/PercentChange";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { Skeleton } from "@/components/ui/Skeleton";
 import {
   whaleApi, type WhaleTrade, type OnchainTransfer, type OISurge,
@@ -33,6 +34,15 @@ export default function WhaleRadarPage() {
   const filteredOI = useMemo(() => (oi?.items ?? []).filter((r) => !q || r.symbol.includes(q)), [oi, q]);
   const filteredChain = useMemo(() => (chain?.items ?? []).filter((r) => !q || r.asset.includes(q)), [chain, q]);
 
+  const lastUpdated = useMemo(() => {
+    const dates = [
+      ...(trades?.items ?? []).map((r) => new Date(r.detected_at)),
+      ...(oi?.items ?? []).map((r) => new Date(r.detected_at)),
+      ...(chain?.items ?? []).map((r) => new Date(r.detected_at)),
+    ];
+    return dates.length ? new Date(Math.max(...dates.map((d) => d.getTime()))) : null;
+  }, [trades, oi, chain]);
+
   return (
     <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
@@ -40,7 +50,10 @@ export default function WhaleRadarPage() {
           <h1 className="text-lg font-semibold md:text-2xl">WhaleRadar — Smart-money tracking</h1>
           <p className="text-sm text-textSecondary">Large trades, OI surges, and on-chain transfers.</p>
         </div>
-        <LiveIndicator />
+        <div className="flex flex-col items-end gap-1">
+          <LiveIndicator />
+          <LastUpdated date={lastUpdated} />
+        </div>
       </header>
 
       <Card>

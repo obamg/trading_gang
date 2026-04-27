@@ -1,9 +1,11 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { Badge } from "@/components/ui/Badge";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { macroApi } from "@/api/modules";
 
 export default function MacroPage() {
@@ -17,11 +19,19 @@ export default function MacroPage() {
     macroScore > 20 ? "text-profit" :
     macroScore < -20 ? "text-loss" : "text-warning";
 
+  const lastUpdated = useMemo(() => {
+    if (snap?.snapshot_at) return new Date(snap.snapshot_at);
+    return null;
+  }, [snap]);
+
   return (
     <div className="flex flex-col gap-4 md:gap-6">
-      <header>
-        <h1 className="text-lg font-semibold md:text-2xl">MacroPulse — Traditional market context</h1>
-        <p className="text-sm text-textSecondary">DXY, yields, VIX, ETF flows, and the macro regime.</p>
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold md:text-2xl">MacroPulse — Traditional market context</h1>
+          <p className="text-sm text-textSecondary">DXY, yields, VIX, ETF flows, and the macro regime.</p>
+        </div>
+        <LastUpdated date={lastUpdated} label="Last snapshot" />
       </header>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

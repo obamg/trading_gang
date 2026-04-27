@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { MetricCard } from "@/components/ui/MetricCard";
@@ -5,6 +6,7 @@ import { Table, type Column } from "@/components/ui/Table";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { sentimentApi, type FundingRow } from "@/api/modules";
 
 export default function SentimentPage() {
@@ -12,11 +14,19 @@ export default function SentimentPage() {
   const { data: funding, isLoading: fL } = useQuery({ queryKey: ["sentiment", "funding"], queryFn: () => sentimentApi.funding(30) });
   const { data: ls, isLoading: lsL } = useQuery({ queryKey: ["sentiment", "ls"], queryFn: () => sentimentApi.longShort(30) });
 
+  const lastUpdated = useMemo(() => {
+    if (overview?.snapshot_at) return new Date(overview.snapshot_at);
+    return null;
+  }, [overview]);
+
   return (
     <div className="flex flex-col gap-4 md:gap-6">
-      <header>
-        <h1 className="text-lg font-semibold md:text-2xl">SentimentPulse — Crowd positioning</h1>
-        <p className="text-sm text-textSecondary">Funding, long/short ratio, and macro sentiment gauges.</p>
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold md:text-2xl">SentimentPulse — Crowd positioning</h1>
+          <p className="text-sm text-textSecondary">Funding, long/short ratio, and macro sentiment gauges.</p>
+        </div>
+        <LastUpdated date={lastUpdated} label="Last snapshot" />
       </header>
 
       <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 md:gap-3">

@@ -7,6 +7,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { Badge } from "@/components/ui/Badge";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { liquidApi, type HeatmapLevel } from "@/api/modules";
 
@@ -31,6 +32,11 @@ export default function LiquidMapPage() {
     return Math.max(1, ...levels.map((l) => l.size_usd));
   }, [heatmap]);
 
+  const lastUpdated = useMemo(() => {
+    const items = recent?.items ?? [];
+    return items.length ? new Date(items[0].detected_at) : null;
+  }, [recent]);
+
   return (
     <div className="flex flex-col gap-4 md:gap-6">
       <header className="flex items-center justify-between">
@@ -38,7 +44,10 @@ export default function LiquidMapPage() {
           <h1 className="text-lg font-semibold md:text-2xl">LiquidMap — Liquidation heatmap</h1>
           <p className="text-sm text-textSecondary">Where leverage is concentrated and likely to unwind.</p>
         </div>
-        <LiveIndicator />
+        <div className="flex flex-col items-end gap-1">
+          <LiveIndicator />
+          <LastUpdated date={lastUpdated} />
+        </div>
       </header>
 
       <form

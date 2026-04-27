@@ -114,9 +114,10 @@ export default function RiskCalcPage() {
                   <Stat label="Stop distance" value={<NumberDisplay value={result.stop_distance_pct} decimals={2} suffix="%" />} />
                   <Stat label="Leverage" value={<NumberDisplay value={result.leverage} decimals={2} suffix="x" />} />
                   <Stat label="Liquidation" value={result.liquidation_price ? <NumberDisplay value={result.liquidation_price} decimals={4} /> : "—"} />
-                  <Stat label="Max loss" value={<NumberDisplay value={result.max_loss_usd} decimals={2} prefix="$" />} />
-                  <Stat label="R:R" value={result.rr_ratio ? <NumberDisplay value={result.rr_ratio} decimals={2} /> : "—"} />
                 </div>
+
+                <PnlBreakdown maxLoss={result.max_loss_usd} potentialProfit={result.potential_profit_usd} rrRatio={result.rr_ratio} />
+
                 {result.warnings.length > 0 && (
                   <div className="flex flex-col gap-1 rounded border border-warning/40 bg-warning/10 p-3">
                     <div className="text-xs font-semibold text-warning">Warnings</div>
@@ -143,6 +144,53 @@ export default function RiskCalcPage() {
   );
 }
 
+function PnlBreakdown({ maxLoss, potentialProfit, rrRatio }: { maxLoss: number; potentialProfit: number | null; rrRatio: number | null }) {
+  const hasTP = potentialProfit != null && potentialProfit > 0;
+  const lossPct = hasTP ? maxLoss / (maxLoss + potentialProfit) * 100 : 50;
+  const profitPct = hasTP ? 100 - lossPct : 0;
+
+  return (
+    <div className="rounded-md border border-borderSubtle bg-bgElevated p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-semibold text-textSecondary">PNL Breakdown</span>
+        {rrRatio != null && (
+          <span className={`text-sm font-bold ${rrRatio >= 2 ? "text-profit" : rrRatio >= 1 ? "text-warning" : "text-loss"}`}>
+            {rrRatio.toFixed(2)} R:R
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div className="rounded border border-loss/40 bg-loss-subtle p-2.5">
+          <div className="text-[10px] uppercase tracking-wider text-loss/70">Max Loss</div>
+          <div className="mt-0.5 text-lg font-bold text-loss">
+            -$<NumberDisplay value={maxLoss} decimals={2} />
+          </div>
+        </div>
+        <div className={`rounded border p-2.5 ${hasTP ? "border-profit/40 bg-profit-subtle" : "border-borderSubtle bg-bgCard"}`}>
+          <div className={`text-[10px] uppercase tracking-wider ${hasTP ? "text-profit/70" : "text-textMuted"}`}>Potential Profit</div>
+          <div className={`mt-0.5 text-lg font-bold ${hasTP ? "text-profit" : "text-textMuted"}`}>
+            {hasTP ? <>+$<NumberDisplay value={potentialProfit} decimals={2} /></> : "Set TP"}
+          </div>
+        </div>
+      </div>
+
+      {hasTP && (
+        <div>
+          <div className="flex h-3 w-full overflow-hidden rounded-full">
+            <div className="bg-loss/60 transition-all" style={{ width: `${lossPct}%` }} />
+            <div className="bg-profit/60 transition-all" style={{ width: `${profitPct}%` }} />
+          </div>
+          <div className="mt-1.5 flex justify-between text-[10px] text-textMuted">
+            <span>Risk {lossPct.toFixed(0)}%</span>
+            <span>Reward {profitPct.toFixed(0)}%</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-md border border-borderSubtle bg-bgElevated p-3">
@@ -159,7 +207,9 @@ function HistoryTable({ rows }: { rows: CalcHistoryRow[] }) {
     { key: "stop", header: "Stop", accessor: (r) => <NumberDisplay value={r.stop_loss_price} decimals={4} />, align: "right" },
     { key: "size", header: "Size", accessor: (r) => <NumberDisplay value={r.position_size_usd} decimals={0} prefix="$" />, align: "right" },
     { key: "lev", header: "Lev", accessor: (r) => <NumberDisplay value={r.leverage} decimals={1} suffix="x" />, align: "right" },
-    { key: "rr", header: "R:R", accessor: (r) => r.rr_ratio != null ? <NumberDisplay value={r.rr_ratio} decimals={2} /> : "—", align: "right" },
+    { key: "loss", header: "Max Loss", accessor: (r) => <span className="text-loss">-$<NumberDisplay value={r.max_loss_usd} decimals={0} /></span>, align: "right", sortValue: (r) => r.max_loss_usd },
+    { key: "profit", header: "Profit", accessor: (r) => r.potential_profit_usd != null ? <span className="text-profit">+$<NumberDisplay value={r.potential_profit_usd} decimals={0} /></span> : "—", align: "right", sortValue: (r) => r.potential_profit_usd ?? 0 },
+    { key: "rr", header: "R:R", accessor: (r) => r.rr_ratio != null ? <span className={r.rr_ratio >= 2 ? "text-profit" : r.rr_ratio >= 1 ? "text-warning" : "text-loss"}><NumberDisplay value={r.rr_ratio} decimals={2} /></span> : "—", align: "right" },
     { key: "time", header: "Time", accessor: (r) => new Date(r.calculated_at).toLocaleString(), align: "right" },
   ];
   return <Table columns={columns} rows={rows} rowKey={(r) => r.id} emptyMessage="No calculations yet." />;

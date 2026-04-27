@@ -20,16 +20,18 @@ from app.models.gemradar import GemRadarAlert
 from app.services import redis_service
 
 DEXSCREENER_SEARCH = "https://api.dexscreener.com/latest/dex/search"
+GECKOTERMINAL_TRENDING = "https://api.geckoterminal.com/api/v2/networks/{network}/trending_pools"
+GECKO_CHAIN_MAP = {"solana": "solana", "ethereum": "eth", "bsc": "bsc"}
 RUGCHECK_URL = "https://api.rugcheck.xyz/v1/tokens/{mint}/report"
 BINANCE_ANNOUNCEMENTS = (
     "https://www.binance.com/bapi/composite/v1/public/cms/article/catalog/list/query"
     "?catalogId=48&pageNo=1&pageSize=10"
 )
 
-MIN_MCAP_USD = 1_000_000
+MIN_MCAP_USD = 500_000
 MAX_MCAP_USD = 100_000_000
-PRICE_CHANGE_THRESHOLD = 10.0  # percent
-VOLUME_MCAP_RATIO_THRESHOLD = 5.0
+PRICE_CHANGE_THRESHOLD = 3.0  # percent in 5m
+VOLUME_MCAP_RATIO_THRESHOLD = 1.0  # percent of mcap traded in 5m
 COOLDOWN_MINUTES = 60
 CHAINS = ("solana", "ethereum", "bsc")
 
@@ -115,62 +117,89 @@ async def _risk_check(chain: str, address: str) -> dict[str, Any]:
     }
 
 
-async def _fetch_dexscreener(chain: str) -> list[dict]:
-    """DexScreener has no by-chain listing endpoint; use its search for the chain name."""
+async def _fetch_trending(chain: str) -> list[dict]:
+    """Fetch trending pools from GeckoTerminal for a given chain."""
+    network = GECKO_CHAIN_MAP.get(chain, chain)
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(DEXSCREENER_SEARCH, params={"q": chain})
+            resp = await client.get(
+                GECKOTERMINAL_TRENDING.format(network=network),
+                params={"page": 1},
+            )
             resp.raise_for_status()
-            return resp.json().get("pairs", []) or []
+            pools = resp.json().get("data", []) or []
+            results = []
+            for p in pools:
+                attr = p.get("attributes") or {}
+                name = attr.get("name", "")
+                token_symbol = name.split(" / ")[0].strip() if " / " in name else name
+                mcap = float(attr.get("market_cap_usd") or attr.get("fdv_usd") or 0)
+                pct = attr.get("price_change_percentage") or {}
+                vol = attr.get("volume_usd") or {}
+                results.append({
+                    "chain": chain,
+                    "symbol": token_symbol.upper(),
+                    "name": name,
+                    "address": attr.get("address", ""),
+                    "mcap": mcap,
+                    "price_usd": float(attr.get("base_token_price_usd") or 0),
+                    "price_change_5m": float(pct.get("m5") or 0),
+                    "price_change_1h": float(pct.get("h1") or 0),
+                    "price_change_24h": float(pct.get("h24") or 0),
+                    "volume_5m": float(vol.get("m5") or 0),
+                    "volume_1h": float(vol.get("h1") or 0),
+                    "volume_24h": float(vol.get("h24") or 0),
+                    "dex": attr.get("dex_id", ""),
+                })
+            return results
     except Exception as e:
-        log.warning("dexscreener_failed", chain=chain, err=str(e))
+        log.warning("geckoterminal_failed", chain=chain, err=str(e))
         return []
 
 
 async def scan(db: AsyncSession) -> list[dict]:
     fired: list[dict] = []
+    seen_symbols: set[str] = set()
+
     for chain in CHAINS:
-        pairs = await _fetch_dexscreener(chain)
-        for p in pairs:
-            if (p.get("chainId") or "").lower() != chain:
+        pools = await _fetch_trending(chain)
+        for p in pools:
+            symbol = p["symbol"]
+            if not symbol or symbol in seen_symbols:
                 continue
-            mcap = float(p.get("fdv") or p.get("marketCap") or 0)
+            seen_symbols.add(symbol)
+
+            mcap = p["mcap"]
             if mcap < MIN_MCAP_USD or mcap > MAX_MCAP_USD:
                 continue
-            price_change_5m = float((p.get("priceChange") or {}).get("m5") or 0)
-            volume_5m = float((p.get("volume") or {}).get("m5") or 0)
-            if price_change_5m < PRICE_CHANGE_THRESHOLD:
-                continue
-            if mcap == 0 or (volume_5m / mcap) < (VOLUME_MCAP_RATIO_THRESHOLD / 100):
-                # ratio_threshold is interpreted as a multiple of mcap → using
-                # /100 to compare to a percentage makes this effectively "5% of mcap traded in 5m"
-                # (mirrors the spec's intent: extreme relative flow)
+
+            price_change_5m = abs(p["price_change_5m"])
+            volume_5m = p["volume_5m"]
+            vol_mcap_ratio = (volume_5m / mcap * 100) if mcap > 0 else 0
+
+            if price_change_5m < PRICE_CHANGE_THRESHOLD and vol_mcap_ratio < VOLUME_MCAP_RATIO_THRESHOLD:
                 continue
 
-            base = p.get("baseToken") or {}
-            symbol = (base.get("symbol") or "").upper()
-            if not symbol:
-                continue
             if await redis_service.is_on_cooldown("gemradar", symbol):
                 continue
 
-            address = base.get("address") or ""
+            address = p.get("address", "")
             risk = await _risk_check(chain, address)
             risk_label = _score_to_label(int(risk["risk_score_numeric"]))
 
             detected_at = datetime.now(timezone.utc)
             row = GemRadarAlert(
                 symbol=symbol,
-                name=base.get("name"),
+                name=p.get("name"),
                 contract_address=address or None,
                 chain=chain,
-                dex=p.get("dexId"),
+                dex=p.get("dex"),
                 is_cex_listed=False,
-                price_usd=Decimal(str(p.get("priceUsd") or 0)),
-                price_change_pct=Decimal(str(round(price_change_5m, 2))),
+                price_usd=Decimal(str(p["price_usd"])),
+                price_change_pct=Decimal(str(round(p["price_change_5m"], 2))),
                 price_change_period_min=5,
                 volume_usd_current=Decimal(str(round(volume_5m, 2))),
-                volume_mcap_ratio=Decimal(str(round(volume_5m / mcap, 4))) if mcap else None,
+                volume_mcap_ratio=Decimal(str(round(vol_mcap_ratio / 100, 4))) if mcap else None,
                 market_cap_usd=Decimal(str(round(mcap, 2))),
                 risk_score=risk_label,
                 risk_score_numeric=int(risk["risk_score_numeric"]),
@@ -192,10 +221,10 @@ async def scan(db: AsyncSession) -> list[dict]:
                 "id": str(row.id),
                 "symbol": symbol,
                 "chain": chain,
-                "price_usd": float(row.price_usd) if row.price_usd is not None else None,
-                "price_change_pct": float(row.price_change_pct) if row.price_change_pct else None,
-                "market_cap_usd": float(row.market_cap_usd) if row.market_cap_usd else None,
-                "volume_5m_usd": float(row.volume_usd_current) if row.volume_usd_current else None,
+                "price_usd": p["price_usd"],
+                "price_change_pct": round(p["price_change_5m"], 2),
+                "market_cap_usd": round(mcap, 2),
+                "volume_5m_usd": round(volume_5m, 2),
                 "risk_score": risk_label,
                 "risk_score_numeric": int(risk["risk_score_numeric"]),
                 "risk_flags": risk["risk_flags"],
@@ -209,7 +238,7 @@ async def scan(db: AsyncSession) -> list[dict]:
                 chain=chain,
                 risk=risk_label,
                 mcap=int(mcap),
-                pct=round(price_change_5m, 2),
+                pct=round(p["price_change_5m"], 2),
             )
             fired.append(alert)
     return fired

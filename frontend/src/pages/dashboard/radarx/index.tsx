@@ -10,6 +10,7 @@ import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { PercentChange } from "@/components/ui/PercentChange";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { radarxApi, type RadarXAlert, type TopMover } from "@/api/modules";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
 import { MODULE_BY_KEY } from "@/components/layout/modules";
@@ -76,6 +77,11 @@ export default function RadarXPage() {
 
   const divergenceCount = useMemo(() => combined.filter(isDivergence).length, [combined]);
 
+  const lastUpdated = useMemo(() => {
+    if (combined.length === 0) return null;
+    return new Date(combined[0].triggered_at);
+  }, [combined]);
+
   type Row = TopMover & { _rank: number };
   const columns: Column<Row>[] = [
     { key: "rank", header: "#", accessor: (r) => <span className="text-textMuted">{r._rank}</span>, align: "left" },
@@ -93,7 +99,10 @@ export default function RadarXPage() {
           <h1 className="text-lg font-semibold md:text-2xl">RadarX — Volume spike detection</h1>
           <p className="text-sm text-textSecondary">Live z-score alerts on 5-minute candles.</p>
         </div>
-        <LiveIndicator />
+        <div className="flex flex-col items-end gap-1">
+          <LiveIndicator />
+          <LastUpdated date={lastUpdated} />
+        </div>
       </header>
 
       <section className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
