@@ -8,7 +8,8 @@ export type ModuleKey =
   | "riskcalc"
   | "tradelog"
   | "performancecore"
-  | "oracle";
+  | "oracle"
+  | "newspulse";
 
 export interface AlertEvent {
   type: string;

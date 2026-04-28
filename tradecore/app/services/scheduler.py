@@ -17,6 +17,7 @@ from app.modules.macropulse import collector as macropulse_collector
 from app.modules.oracle import engine as oracle_engine
 from app.modules.radarx import detector as radarx_detector
 from app.modules.sentimentpulse import collector as sentiment_collector
+from app.modules.newspulse import collector as newspulse_collector
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.services import redis_service
 
@@ -123,6 +124,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         hours=24,
         id="macro_calendar",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        newspulse_collector.run_news_collection,
+        "interval",
+        minutes=5,
+        id="newspulse_collect",
         coalesce=True,
         max_instances=1,
     )

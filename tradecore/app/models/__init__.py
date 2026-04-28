@@ -14,3 +14,4 @@ from app.models.riskcalc import RiskCalcHistory  # noqa: F401
 from app.models.tradelog import Trade, TradeTag  # noqa: F401
 from app.models.performance import PerformanceSnapshot, SignalPerformance  # noqa: F401
 from app.models.delivery import UserAlertDelivery, AlertCooldown  # noqa: F401
+from app.models.news import NewsArticle  # noqa: F401

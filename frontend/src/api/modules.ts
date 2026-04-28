@@ -349,3 +349,20 @@ export const oracleApi = {
   performance: () => http.get<{ total_signals: number; measured_1h: number; measured_4h: number; accuracy_1h_pct: number | null; accuracy_4h_pct: number | null }>("/oracle/performance").then((r) => r.data),
   updateSettings: (body: Record<string, unknown>) => http.post("/oracle/settings", body).then((r) => r.data),
 };
+
+// ---------- NewsPulse ----------
+export interface NewsArticle {
+  id: string;
+  title: string;
+  url: string;
+  source: string;
+  sentiment: string | null;
+  importance: string | null;
+  coins: string[];
+  published_at: string;
+}
+export const newsApi = {
+  articles: (params?: { limit?: number; sentiment?: string; importance?: string; coin?: string }) =>
+    http.get<Paginated<NewsArticle>>("/news/articles", { params }).then((r) => r.data),
+  stats: () => http.get<{ articles_24h: number; bullish_24h: number; bearish_24h: number; high_impact_24h: number }>("/news/stats").then((r) => r.data),
+};

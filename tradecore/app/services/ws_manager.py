@@ -23,7 +23,7 @@ from app.services import redis_service
 from app.services.telegram_service import service as telegram_service
 
 UNREAD_BUFFER_SIZE = 20
-ALERT_MODULES = ("radarx", "whale", "gemradar", "oracle", "sentiment", "macro")
+ALERT_MODULES = ("radarx", "whale", "gemradar", "oracle", "sentiment", "macro", "newspulse")
 
 
 class ConnectionManager:
