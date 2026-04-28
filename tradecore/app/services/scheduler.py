@@ -5,6 +5,8 @@ down the scheduler. Jobs are no-ops in local dev unless there's data in Redis.
 """
 from __future__ import annotations
 
+import asyncio
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import settings
@@ -29,6 +31,7 @@ async def run_radarx_scan() -> None:
                 await radarx_detector.detect_symbol(db, symbol)
             except Exception as e:
                 log.error("radarx_scan_failed", symbol=symbol, err=str(e))
+            await asyncio.sleep(0.05)
 
 
 async def refresh_symbol_list() -> None:

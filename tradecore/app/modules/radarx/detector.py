@@ -1,6 +1,8 @@
 """RadarX — volume spike detection on 5m closed candles.
 
 Reads the last 21 candles from Redis: baseline = oldest 20, target = newest.
+Falls back to Binance REST klines when Redis candles are stale (WebSocket
+kline streams may be unavailable from some VPS locations).
 Fires when z-score and ratio over the 20-candle baseline both clear thresholds
 (defaults: z ≥ 3.0, ratio ≥ 4.0) AND 24h quote volume ≥ min_volume_usd.
 Cooldown suppresses re-alerting the same symbol within 30 minutes.
@@ -8,10 +10,12 @@ Cooldown suppresses re-alerting the same symbol within 30 minutes.
 from __future__ import annotations
 
 import statistics
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +23,62 @@ from app.config import settings as app_settings
 from app.logging_config import log
 from app.models.radarx import RadarXAlert
 from app.services import redis_service
+
+CANDLE_STALE_SECONDS = 600
+_rest_client: httpx.AsyncClient | None = None
+
+
+def _get_rest_client() -> httpx.AsyncClient:
+    global _rest_client
+    if _rest_client is None or _rest_client.is_closed:
+        _rest_client = httpx.AsyncClient(timeout=10.0)
+    return _rest_client
+
+
+async def _fetch_candles_rest(symbol: str, limit: int = 25) -> list[dict]:
+    """Fetch 5m klines from Binance REST API and update Redis cache."""
+    client = _get_rest_client()
+    url = f"{app_settings.binance_rest_url}/fapi/v1/klines"
+    resp = await client.get(url, params={"symbol": symbol, "interval": "5m", "limit": limit})
+    resp.raise_for_status()
+    rows = resp.json()
+    candles: list[dict] = []
+    for r in rows:
+        candles.append({
+            "t": r[0], "T": r[6],
+            "o": float(r[1]), "h": float(r[2]), "l": float(r[3]), "c": float(r[4]),
+            "v": float(r[5]), "q": float(r[7]), "n": r[8],
+        })
+    # Only keep closed candles (close_time in the past)
+    now_ms = int(time.time() * 1000)
+    closed = [c for c in candles if c["T"] < now_ms]
+    if closed:
+        # Update Redis: overwrite the candle list (newest first)
+        r = redis_service.get_redis()
+        key = f"candles:{symbol}"
+        import json
+        pipe = r.pipeline()
+        await pipe.delete(key).execute()
+        for c in reversed(closed):
+            await r.lpush(key, json.dumps(c))
+        await r.ltrim(key, 0, 49)
+    return list(reversed(closed))  # newest first
+
+
+async def _get_candles(symbol: str, limit: int = 21) -> list[dict]:
+    """Get candles from Redis, falling back to REST if stale."""
+    candles = await redis_service.get_candles(symbol, limit=limit)
+    if candles:
+        close_time = candles[0].get("T") or 0
+        close_ts = int(close_time) / 1000 if close_time > 10_000_000_000 else int(close_time)
+        age = time.time() - close_ts
+        if age < CANDLE_STALE_SECONDS:
+            return candles
+    try:
+        rest_candles = await _fetch_candles_rest(symbol, limit + 5)
+        return rest_candles[:limit]
+    except Exception:
+        return candles
 
 # Defaults — may be overridden per-user when delivering, but detection runs
 # against these global thresholds for efficiency.
@@ -69,11 +129,10 @@ async def detect_symbol(
     if await redis_service.is_on_cooldown("radarx", symbol):
         return None
 
-    candles = await redis_service.get_candles(symbol, limit=21)
+    candles = await _get_candles(symbol, limit=21)
     if len(candles) < 21:
         return None
 
-    # Redis stores newest at index 0 (lpush + ltrim)
     current = candles[0]
     baseline = candles[1:21]
 
@@ -170,7 +229,7 @@ async def live_top_movers(limit: int = 20) -> list[dict]:
     symbols = await redis_service.get_symbol_list()
     scored: list[dict] = []
     for symbol in symbols:
-        candles = await redis_service.get_candles(symbol, limit=21)
+        candles = await _get_candles(symbol, limit=21)
         if len(candles) < 21:
             continue
         current_vol = _candle_quote_volume(candles[0])
