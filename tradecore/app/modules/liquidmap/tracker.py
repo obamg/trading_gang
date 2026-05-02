@@ -1,16 +1,22 @@
 """LiquidMap — subscribes to Redis `liquidations` pub/sub, persists notable events,
 maintains a per-symbol price-bucketed heatmap in Redis, and fires alerts on
-very large liquidations.
+very large liquidations. Also polls Binance REST forceOrders as a fallback
+when WebSocket streams are blocked.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.liquidmap import LiquidationEvent
@@ -179,4 +185,98 @@ class LiquidationListener:
 
 listener = LiquidationListener()
 
-__all__ = ["ingest_event", "get_heatmap", "listener", "LiquidationListener"]
+
+# ---------- REST fallback poller ----------
+
+POLL_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
+    "ADAUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "MATICUSDT",
+    "BNBUSDT", "LTCUSDT", "SUIUSDT", "APTUSDT", "ARBUSDT",
+]
+FORCE_ORDERS_URL = f"{settings.binance_rest_url}/fapi/v1/forceOrders"
+
+_rest_client: httpx.AsyncClient | None = None
+
+
+def _get_rest_client() -> httpx.AsyncClient:
+    global _rest_client
+    if _rest_client is None or _rest_client.is_closed:
+        _rest_client = httpx.AsyncClient(timeout=10.0)
+    return _rest_client
+
+
+def _sign_params(params: dict) -> dict:
+    params["timestamp"] = int(time.time() * 1000)
+    qs = "&".join(f"{k}={v}" for k, v in params.items())
+    sig = hmac.new(
+        settings.binance_api_secret.encode(),
+        qs.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    params["signature"] = sig
+    return params
+
+
+async def poll_force_orders() -> int:
+    """Poll Binance REST forceOrders for each symbol. Returns count of events ingested."""
+    if not settings.binance_api_key or not settings.binance_api_secret:
+        return 0
+
+    r = redis_service.get_redis()
+    client = _get_rest_client()
+    total = 0
+
+    for symbol in POLL_SYMBOLS:
+        try:
+            params = _sign_params({"symbol": symbol, "limit": 20})
+            resp = await client.get(
+                FORCE_ORDERS_URL,
+                params=params,
+                headers={"X-MBX-APIKEY": settings.binance_api_key},
+            )
+            resp.raise_for_status()
+            orders = resp.json()
+        except Exception as e:
+            log.warning("liquidmap_rest_failed", symbol=symbol, err=str(e))
+            continue
+
+        for order in orders:
+            trade_id = str(order.get("tradeId") or order.get("orderId", ""))
+            dedup_key = f"liqmap:seen:{trade_id}"
+            if await r.exists(dedup_key):
+                continue
+            await r.set(dedup_key, "1", ex=3600)
+
+            side = "long" if order.get("side", "").upper() == "SELL" else "short"
+            price = float(order.get("price", 0))
+            qty = float(order.get("origQty", 0))
+            usd = price * qty
+
+            event = {
+                "symbol": symbol,
+                "side": side,
+                "price": price,
+                "usd": usd,
+            }
+
+            await redis_service.publish_liquidation(event)
+
+            async with AsyncSessionLocal() as db:
+                await ingest_event(db, event)
+            total += 1
+
+        await asyncio.sleep(0.1)
+
+    if total:
+        log.info("liquidmap_rest_polled", events=total)
+    return total
+
+
+async def run_poll_force_orders() -> None:
+    try:
+        await poll_force_orders()
+    except Exception as e:
+        log.error("liquidmap_poll_failed", err=str(e))
+
+
+__all__ = ["ingest_event", "get_heatmap", "listener", "LiquidationListener", "run_poll_force_orders"]

@@ -18,6 +18,7 @@ from app.modules.oracle import engine as oracle_engine
 from app.modules.radarx import detector as radarx_detector
 from app.modules.sentimentpulse import collector as sentiment_collector
 from app.modules.newspulse import collector as newspulse_collector
+from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.services import redis_service
 
@@ -90,6 +91,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=15,
         id="gemradar_cex_listings",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        liquidmap_tracker.run_poll_force_orders,
+        "interval",
+        seconds=30,
+        id="liquidmap_poll",
         coalesce=True,
         max_instances=1,
     )

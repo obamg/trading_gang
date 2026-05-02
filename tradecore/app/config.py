@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     binance_rest_url: str = "https://fapi.binance.com"
     binance_min_quote_volume_usd: float = 10_000_000.0
     binance_symbol_refresh_minutes: int = 60
+    binance_api_key: str = ""
+    binance_api_secret: str = ""
     binance_streams_enabled: bool = False  # opt-in via env for local dev
 
     # Telegram
