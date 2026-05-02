@@ -136,7 +136,7 @@ export default function FlowPulsePage() {
         <div>
           <h1 className="text-lg font-semibold md:text-2xl">FlowPulse — Order Flow Signals</h1>
           <p className="text-sm text-textSecondary">
-            Book imbalance, taker volume ratio, and top trader positioning. Best signals have 3/3 confluence.
+            10-min smoothed averages. Best signals have 3/3 confluence with high depth.
           </p>
         </div>
         <LastUpdated date={lastUpdated} label="Last scan" />

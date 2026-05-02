@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import httpx
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -22,6 +23,8 @@ from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.flowpulse import FlowSignal
 from app.services import redis_service
+
+SMOOTHING_WINDOW = 5  # average last 5 snapshots = 10 minutes
 
 DEPTH_URL = f"{settings.binance_rest_url}/fapi/v1/depth"
 TAKER_URL = f"{settings.binance_rest_url}/futures/data/takerlongshortRatio"
@@ -140,7 +143,7 @@ def _compute_composite(
 
 async def scan_symbol(
     db: AsyncSession, client: httpx.AsyncClient, symbol: str, snapshot_at: datetime
-) -> dict | None:
+) -> bool:
     book, taker, top = await asyncio.gather(
         _fetch_depth(client, symbol),
         _fetch_taker_ratio(client, symbol),
@@ -148,21 +151,9 @@ async def scan_symbol(
     )
 
     if not book and not taker and not top:
-        return None
+        return False
 
     direction, intensity = _compute_composite(book, taker, top)
-
-    # Cache in Redis for Oracle to read
-    r = redis_service.get_redis()
-    cache = {
-        "book_imbalance": book["imbalance"] if book else None,
-        "taker_ratio": taker["ratio"] if taker else None,
-        "top_long_ratio": top["long_ratio"] if top else None,
-        "direction": direction,
-        "intensity": intensity,
-        "ts": snapshot_at.isoformat(),
-    }
-    await r.set(f"flow:{symbol}", json.dumps(cache), ex=REDIS_TTL)
 
     row = FlowSignal(
         symbol=symbol,
@@ -180,34 +171,84 @@ async def scan_symbol(
     )
     db.add(row)
 
-    # Alert on extreme signals
-    alert = None
-    is_extreme = (
-        (book and (book["imbalance"] >= BOOK_IMBALANCE_ALERT or book["imbalance"] <= 1.0 / BOOK_IMBALANCE_ALERT))
-        or (taker and (taker["ratio"] >= TAKER_RATIO_ALERT or taker["ratio"] <= 1.0 / TAKER_RATIO_ALERT))
-        or (top and (top["long_ratio"] >= TOP_RATIO_EXTREME or top["short_ratio"] >= TOP_RATIO_EXTREME))
-    )
-    if is_extreme:
-        alert = {
-            "module": "flowpulse",
-            "type": "flow_signal",
-            "symbol": symbol,
+    # Alert only on smoothed extremes (checked after smoothing in run_scan)
+    return True
+
+
+def _avg(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+async def _smooth_and_cache(db: AsyncSession, symbols: list[str], snapshot_at: datetime) -> None:
+    """Compute rolling averages over last SMOOTHING_WINDOW snapshots and cache in Redis."""
+    r = redis_service.get_redis()
+
+    for symbol in symbols:
+        rows = (
+            await db.execute(
+                select(FlowSignal)
+                .where(FlowSignal.symbol == symbol)
+                .order_by(desc(FlowSignal.snapshot_at))
+                .limit(SMOOTHING_WINDOW)
+            )
+        ).scalars().all()
+
+        if not rows:
+            continue
+
+        book_vals = [float(r.book_imbalance) for r in rows if r.book_imbalance is not None]
+        taker_vals = [float(r.taker_ratio) for r in rows if r.taker_ratio is not None]
+        top_long_vals = [float(r.top_long_ratio) for r in rows if r.top_long_ratio is not None]
+        bid_vals = [float(r.bid_usd) for r in rows if r.bid_usd is not None]
+        ask_vals = [float(r.ask_usd) for r in rows if r.ask_usd is not None]
+
+        avg_book = round(_avg(book_vals), 4) if book_vals else None
+        avg_taker = round(_avg(taker_vals), 4) if taker_vals else None
+        avg_top_long = round(_avg(top_long_vals), 2) if top_long_vals else None
+        avg_bid = round(_avg(bid_vals), 2) if bid_vals else None
+        avg_ask = round(_avg(ask_vals), 2) if ask_vals else None
+
+        book_d = {"imbalance": avg_book} if avg_book is not None else None
+        taker_d = {"ratio": avg_taker} if avg_taker is not None else None
+        top_d = {"long_ratio": avg_top_long} if avg_top_long is not None else None
+
+        direction, intensity = _compute_composite(book_d, taker_d, top_d)
+
+        cache = {
+            "book_imbalance": avg_book,
+            "taker_ratio": avg_taker,
+            "top_long_ratio": avg_top_long,
+            "bid_usd": avg_bid,
+            "ask_usd": avg_ask,
             "direction": direction,
             "intensity": intensity,
-            "book_imbalance": book["imbalance"] if book else None,
-            "taker_ratio": taker["ratio"] if taker else None,
-            "top_long_ratio": top["long_ratio"] if top else None,
-            "detected_at": snapshot_at.isoformat(),
+            "window": len(rows),
+            "ts": snapshot_at.isoformat(),
         }
-        await redis_service.publish_alert("flowpulse", alert)
-        log.info(
-            "flowpulse_alert",
-            symbol=symbol,
-            direction=direction,
-            intensity=intensity,
-        )
+        await r.set(f"flow:{symbol}", json.dumps(cache), ex=REDIS_TTL)
 
-    return cache
+        # Alert on smoothed extremes only
+        is_extreme = (
+            (avg_book is not None and (avg_book >= BOOK_IMBALANCE_ALERT or avg_book <= 1.0 / BOOK_IMBALANCE_ALERT))
+            or (avg_taker is not None and (avg_taker >= TAKER_RATIO_ALERT or avg_taker <= 1.0 / TAKER_RATIO_ALERT))
+            or (avg_top_long is not None and (avg_top_long >= TOP_RATIO_EXTREME or (100 - avg_top_long) >= TOP_RATIO_EXTREME))
+        )
+        if is_extreme:
+            alert = {
+                "module": "flowpulse",
+                "type": "flow_signal",
+                "symbol": symbol,
+                "direction": direction,
+                "intensity": intensity,
+                "book_imbalance": avg_book,
+                "taker_ratio": avg_taker,
+                "top_long_ratio": avg_top_long,
+                "smoothed": True,
+                "window": len(rows),
+                "detected_at": snapshot_at.isoformat(),
+            }
+            await redis_service.publish_alert("flowpulse", alert)
+            log.info("flowpulse_alert", symbol=symbol, direction=direction, intensity=intensity, window=len(rows))
 
 
 async def run_scan() -> int:
@@ -222,13 +263,16 @@ async def run_scan() -> int:
         async with AsyncSessionLocal() as db:
             for symbol in symbols:
                 try:
-                    result = await scan_symbol(db, client, symbol, snapshot_at)
-                    if result:
+                    ok = await scan_symbol(db, client, symbol, snapshot_at)
+                    if ok:
                         scanned += 1
                 except Exception as e:
                     log.error("flowpulse_scan_failed", symbol=symbol, err=str(e))
                 await asyncio.sleep(0.15)
             await db.commit()
+
+            # Smooth and cache after all raw data is committed
+            await _smooth_and_cache(db, symbols, snapshot_at)
 
     if scanned:
         log.info("flowpulse_scan_complete", scanned=scanned, symbols=len(symbols))

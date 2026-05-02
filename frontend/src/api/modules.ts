@@ -365,6 +365,7 @@ export interface FlowSignalRow {
   top_short_ratio: number | null;
   direction: string | null;
   intensity: number | null;
+  window?: number;
   snapshot_at: string;
 }
 export const flowApi = {

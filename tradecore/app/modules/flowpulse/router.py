@@ -1,4 +1,5 @@
 """FlowPulse API — order flow signals."""
+import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Query
@@ -39,29 +40,36 @@ async def live_signal(symbol: str, _user: CurrentUser):
 
 
 @router.get("/overview")
-async def overview(_user: CurrentUser, db: DBSession):
-    since = datetime.now(timezone.utc) - timedelta(minutes=5)
-    latest_time = (
-        await db.execute(
-            select(FlowSignal.snapshot_at)
-            .where(FlowSignal.snapshot_at >= since)
-            .order_by(desc(FlowSignal.snapshot_at))
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if latest_time is None:
-        return {"items": [], "snapshot_at": None}
-    rows = (
-        await db.execute(
-            select(FlowSignal)
-            .where(FlowSignal.snapshot_at == latest_time)
-            .order_by(desc(FlowSignal.intensity))
-        )
-    ).scalars().all()
-    return {
-        "items": [_serialize(r) for r in rows],
-        "snapshot_at": latest_time.isoformat(),
-    }
+async def overview(_user: CurrentUser):
+    """Return smoothed (rolling average) signals from Redis cache."""
+    r = redis_service.get_redis()
+    symbols = await redis_service.get_symbol_list()
+    items = []
+    snapshot_at = None
+    for symbol in symbols[:30]:
+        raw = await r.get(f"flow:{symbol}")
+        if not raw:
+            continue
+        data = json.loads(raw)
+        items.append({
+            "id": symbol,
+            "symbol": symbol,
+            "bid_usd": data.get("bid_usd"),
+            "ask_usd": data.get("ask_usd"),
+            "book_imbalance": data.get("book_imbalance"),
+            "taker_buy_vol": None,
+            "taker_sell_vol": None,
+            "taker_ratio": data.get("taker_ratio"),
+            "top_long_ratio": data.get("top_long_ratio"),
+            "top_short_ratio": round(100 - data["top_long_ratio"], 2) if data.get("top_long_ratio") is not None else None,
+            "direction": data.get("direction"),
+            "intensity": data.get("intensity"),
+            "window": data.get("window", 1),
+            "snapshot_at": data.get("ts"),
+        })
+        if snapshot_at is None:
+            snapshot_at = data.get("ts")
+    return {"items": items, "snapshot_at": snapshot_at}
 
 
 @router.get("/history/{symbol}")
