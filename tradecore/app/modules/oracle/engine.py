@@ -20,17 +20,19 @@ from app.models.gemradar import GemRadarAlert
 from app.models.radarx import RadarXAlert
 from app.models.sentiment import SentimentSnapshot
 from app.models.whaleradar import OISurgeEvent, WhaleTrade
+from app.modules.flowpulse.detector import get_flow_signal
 from app.modules.liquidmap.tracker import get_heatmap
 from app.modules.macropulse.score import compute_macro_context
 from app.services import redis_service
 
 DEFAULT_WEIGHTS = {
-    "macropulse": 25,
-    "whaleradar": 20,
-    "radarx": 15,
-    "liquidmap": 15,
-    "sentimentpulse": 15,
-    "gemradar": 10,
+    "macropulse": 20,
+    "whaleradar": 18,
+    "flowpulse": 15,
+    "radarx": 13,
+    "liquidmap": 13,
+    "sentimentpulse": 13,
+    "gemradar": 8,
 }
 
 # Majors where GemRadar doesn't apply.
@@ -226,6 +228,23 @@ async def _macro_signal() -> dict:
     }
 
 
+async def _flowpulse_signal(symbol: str) -> dict:
+    data = await get_flow_signal(symbol)
+    if not data:
+        return {"direction": "neutral", "intensity": 0.0, "detail": None}
+    direction = data.get("direction", "neutral")
+    intensity = float(data.get("intensity", 0))
+    return {
+        "direction": direction,
+        "intensity": round(intensity, 3),
+        "detail": {
+            "book_imbalance": data.get("book_imbalance"),
+            "taker_ratio": data.get("taker_ratio"),
+            "top_long_ratio": data.get("top_long_ratio"),
+        },
+    }
+
+
 async def _gemradar_signal(db: AsyncSession, symbol: str) -> dict:
     # Small-caps only; majors return zero-intensity.
     if symbol.upper() in MAJOR_SYMBOLS:
@@ -328,10 +347,12 @@ async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None
     sent = await _sentiment_signal(db, sym)
     macro = await _macro_signal()
     gem = await _gemradar_signal(db, sym)
+    flow = await _flowpulse_signal(sym)
 
     modules = {
         "radarx": radarx,
         "whaleradar": whale,
+        "flowpulse": flow,
         "liquidmap": liq,
         "sentimentpulse": sent,
         "macropulse": macro,

@@ -9,6 +9,7 @@ export type ModuleKey =
   | "tradelog"
   | "performancecore"
   | "oracle"
+  | "flowpulse"
   | "newspulse";
 
 export interface AlertEvent {

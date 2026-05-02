@@ -38,6 +38,7 @@ from app.modules.radarx.router import router as radarx_router
 from app.modules.riskcalc.router import router as riskcalc_router
 from app.modules.sentimentpulse.router import router as sentiment_router
 from app.modules.tradelog.router import router as tradelog_router
+from app.modules.flowpulse.router import router as flowpulse_router
 from app.modules.newspulse.router import router as newspulse_router
 from app.modules.whaleradar.router import router as whaleradar_router
 from app.services import redis_service
@@ -176,6 +177,7 @@ app.include_router(riskcalc_router)
 app.include_router(tradelog_router)
 app.include_router(performance_router)
 app.include_router(newspulse_router)
+app.include_router(flowpulse_router)
 
 
 @app.get("/health")

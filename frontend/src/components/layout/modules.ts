@@ -9,6 +9,7 @@ import {
   BookOpen,
   BarChart2,
   Eye,
+  Activity,
   Newspaper,
   type LucideIcon,
 } from "lucide-react";
@@ -33,6 +34,7 @@ export const MODULES: ModuleDef[] = [
   { key: "tradelog", label: "TradeLog", path: "/tradelog", color: "#94A3B8", icon: BookOpen },
   { key: "performancecore", label: "Performance", path: "/performance", color: "#14B8A6", icon: BarChart2 },
   { key: "oracle", label: "Oracle", path: "/oracle", color: "#8B5CF6", icon: Eye },
+  { key: "flowpulse", label: "FlowPulse", path: "/flowpulse", color: "#F59E0B", icon: Activity },
   { key: "newspulse", label: "NewsPulse", path: "/newspulse", color: "#EF4444", icon: Newspaper },
 ];
 

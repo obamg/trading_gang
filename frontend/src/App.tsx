@@ -19,6 +19,7 @@ import RiskCalcPage from "@/pages/dashboard/riskcalc";
 import TradeLogPage from "@/pages/dashboard/tradelog";
 import PerformancePage from "@/pages/dashboard/performance";
 import OraclePage from "@/pages/dashboard/oracle";
+import FlowPulsePage from "@/pages/dashboard/flowpulse";
 import NewsPulsePage from "@/pages/dashboard/newspulse";
 import SettingsPage from "@/pages/settings";
 import LandingPage from "@/pages/landing";
@@ -112,6 +113,7 @@ export default function App() {
             <Route path="/tradelog" element={<TradeLogPage />} />
             <Route path="/performance" element={<PerformancePage />} />
             <Route path="/oracle" element={<OraclePage />} />
+            <Route path="/flowpulse" element={<FlowPulsePage />} />
             <Route path="/newspulse" element={<NewsPulsePage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

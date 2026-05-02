@@ -17,6 +17,7 @@ from app.modules.macropulse import collector as macropulse_collector
 from app.modules.oracle import engine as oracle_engine
 from app.modules.radarx import detector as radarx_detector
 from app.modules.sentimentpulse import collector as sentiment_collector
+from app.modules.flowpulse import detector as flowpulse_detector
 from app.modules.newspulse import collector as newspulse_collector
 from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.whaleradar import detector as whaleradar_detector
@@ -99,6 +100,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         seconds=30,
         id="liquidmap_poll",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        flowpulse_detector.run_scheduled_scan,
+        "interval",
+        minutes=2,
+        id="flowpulse_scan",
         coalesce=True,
         max_instances=1,
     )

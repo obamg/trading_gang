@@ -351,6 +351,35 @@ export const oracleApi = {
   updateSettings: (body: Record<string, unknown>) => http.post("/oracle/settings", body).then((r) => r.data),
 };
 
+// ---------- FlowPulse ----------
+export interface FlowSignalRow {
+  id: string;
+  symbol: string;
+  bid_usd: number | null;
+  ask_usd: number | null;
+  book_imbalance: number | null;
+  taker_buy_vol: number | null;
+  taker_sell_vol: number | null;
+  taker_ratio: number | null;
+  top_long_ratio: number | null;
+  top_short_ratio: number | null;
+  direction: string | null;
+  intensity: number | null;
+  snapshot_at: string;
+}
+export const flowApi = {
+  overview: () =>
+    http.get<{ items: FlowSignalRow[]; snapshot_at: string | null }>("/flowpulse/overview").then((r) => r.data),
+  live: (symbol: string) =>
+    http.get<{ symbol: string; signal: Record<string, unknown> | null }>(`/flowpulse/live/${symbol}`).then((r) => r.data),
+  extremes: (hours = 1) =>
+    http.get<Paginated<FlowSignalRow>>("/flowpulse/extremes", { params: { hours } }).then((r) => r.data),
+  history: (symbol: string, hours = 24) =>
+    http.get<{ symbol: string; items: FlowSignalRow[] }>(`/flowpulse/history/${symbol}`, { params: { hours } }).then((r) => r.data),
+  stats: () =>
+    http.get<{ snapshots_24h: number; bullish_24h: number; bearish_24h: number; avg_book_imbalance: number | null; avg_taker_ratio: number | null }>("/flowpulse/stats").then((r) => r.data),
+};
+
 // ---------- NewsPulse ----------
 export interface NewsArticle {
   id: string;
