@@ -200,6 +200,8 @@ class TelegramService:
 
     def _format_alert(self, module: str, d: dict) -> str:
         sym = d.get("symbol", "?")
+        t = d.get("type", "")
+
         if module == "radarx":
             is_div = d.get("is_divergence", False)
             header = f"⚡ *DIVERGENCE — {sym}*" if is_div else f"🚨 *RadarX Alert — {sym}*"
@@ -211,12 +213,32 @@ class TelegramService:
                 f"Price: `{_fmt_pct(d.get('price_change_pct'))}`"
                 f"{div_line}"
             )
-        if module == "whale":
-            return (
-                f"🐋 *Whale Alert — {sym}*\n"
-                f"Side: `{d.get('side', '?')}` | Size: `${_fmt_usd(d.get('trade_size_usd'))}`\n"
-                f"Price: `{d.get('price', '?')}`"
-            )
+
+        if module == "whaleradar":
+            if t == "large_trade":
+                side_emoji = "🟢" if d.get("side") == "buy" else "🔴"
+                return (
+                    f"🐋 *Whale Trade — {sym}*\n"
+                    f"{side_emoji} {d.get('side', '?').upper()} | `${_fmt_usd(d.get('trade_size_usd'))}`\n"
+                    f"Price: `{d.get('price', '?')}`"
+                )
+            if t == "oi_surge":
+                arrow = "📈" if float(d.get("oi_change_pct", 0)) > 0 else "📉"
+                return (
+                    f"{arrow} *OI Surge — {sym}*\n"
+                    f"Change: `{_fmt_pct(d.get('oi_change_pct'))}` | Direction: `{d.get('direction', '?')}`\n"
+                    f"OI: `${_fmt_usd(d.get('oi_before_usd'))}` → `${_fmt_usd(d.get('oi_after_usd'))}`\n"
+                    f"Price: `{_fmt_pct(d.get('price_change_pct'))}`"
+                )
+            if t == "onchain_transfer":
+                asset = d.get("asset", "?")
+                tt = (d.get("transfer_type") or "").replace("_", " ").title()
+                return (
+                    f"🐋 *On-Chain — {asset}*\n"
+                    f"Type: `{tt}` | `${_fmt_usd(d.get('amount_usd'))}`\n"
+                    f"Chain: `{d.get('chain', '?')}`"
+                )
+
         if module == "gemradar":
             return (
                 f"💎 *GemRadar — {sym}*\n"
@@ -224,13 +246,74 @@ class TelegramService:
                 f"MCap: `${_fmt_usd(d.get('market_cap_usd'))}`\n"
                 f"Risk: `{d.get('risk_score', '?')}`"
             )
+
         if module == "oracle":
+            rec = (d.get("recommendation") or "").replace("_", " ").upper()
             return (
-                f"🔮 *Oracle Signal — {sym}*\n"
-                f"Score: `{d.get('score', '?')}` | Rec: `{d.get('recommendation', '?')}`\n"
-                f"Confluence: `{d.get('confluence_count', '?')}`"
+                f"🔮 *Oracle — {sym}*\n"
+                f"Score: `{d.get('score', '?')}` | `{rec}`\n"
+                f"Confluence: `{d.get('confluence_count', '?')}` modules\n"
+                f"Entry: `{d.get('entry_price', '-')}` | SL: `{d.get('stop_loss', '-')}` | TP: `{d.get('take_profit', '-')}`"
             )
-        return f"📣 *{module.title()} — {sym}*\n```\n{d}\n```"
+
+        if module == "sentiment":
+            if t == "extreme_funding":
+                rate = float(d.get("funding_rate", 0))
+                emoji = "🔴" if rate > 0 else "🟢"
+                label = "Longs overpaying" if rate > 0 else "Short squeeze setup"
+                return (
+                    f"{emoji} *Extreme Funding — {sym}*\n"
+                    f"Rate: `{rate*100:.4f}%` per 8h\n"
+                    f"Signal: {label}"
+                )
+            if t == "crowded_positioning":
+                return (
+                    f"⚠️ *Crowded Position — {sym}*\n"
+                    f"Side: `{d.get('side', '?').upper()}` heavy\n"
+                    f"Long: `{d.get('long_ratio', '?')}%` | Short: `{d.get('short_ratio', '?')}%`"
+                )
+
+        if module == "newspulse":
+            title = d.get("title", "?")
+            sentiment = (d.get("sentiment") or "neutral").upper()
+            importance = (d.get("importance") or "normal").upper()
+            coins = d.get("coins") or ""
+            source = d.get("source", "?")
+            url = d.get("url", "")
+            s_emoji = "🟢" if sentiment == "BULLISH" else "🔴" if sentiment == "BEARISH" else "⚪"
+            imp = " 🔥" if importance == "HIGH" else ""
+            return (
+                f"📰 *News{imp} — {sentiment}* {s_emoji}\n"
+                f"{title}\n"
+                f"Source: `{source}`{f' | Coins: `{coins}`' if coins else ''}\n"
+                f"[Read →]({url})" if url else ""
+            )
+
+        if module == "liquidmap":
+            side_emoji = "🟢" if d.get("side") == "short" else "🔴"
+            return (
+                f"💥 *Large Liquidation — {sym}* {side_emoji}\n"
+                f"Side: `{d.get('side', '?').upper()}` | `${_fmt_usd(d.get('size_usd'))}`\n"
+                f"Price: `{d.get('price', '?')}`"
+            )
+
+        if module == "flowpulse":
+            dir_emoji = "🟢" if d.get("direction") == "bullish" else "🔴" if d.get("direction") == "bearish" else "⚪"
+            direction = (d.get("direction") or "neutral").upper()
+            parts = [f"🌊 *FlowPulse — {sym}* {dir_emoji}\n"]
+            parts.append(f"Direction: `{direction}` | Intensity: `{d.get('intensity', '?')}`\n")
+            details = []
+            if d.get("book_imbalance") is not None:
+                details.append(f"Book: `{d['book_imbalance']:.2f}`")
+            if d.get("taker_ratio") is not None:
+                details.append(f"Taker: `{d['taker_ratio']:.3f}`")
+            if d.get("top_long_ratio") is not None:
+                details.append(f"Top L/S: `{d['top_long_ratio']:.0f}%/{100-d['top_long_ratio']:.0f}%`")
+            if details:
+                parts.append(" | ".join(details))
+            return "".join(parts)
+
+        return f"📣 *{module.title()} — {sym}*\n`{t or 'alert'}`"
 
 
 def _fmt_usd(v) -> str:
