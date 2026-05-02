@@ -6,8 +6,8 @@ Revises: 004
 from alembic import op
 import sqlalchemy as sa
 
-revision = "005"
-down_revision = "004"
+revision = "005_gemradar_liquidity"
+down_revision = "004_add_news_articles"
 branch_labels = None
 depends_on = None
 
