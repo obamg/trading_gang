@@ -154,18 +154,19 @@ export interface GemAlert {
   symbol: string;
   name: string | null;
   chain: string | null;
-  address: string | null;
+  contract_address: string | null;
   price_usd: number | null;
   market_cap_usd: number | null;
   liquidity_usd: number | null;
   volume_24h_usd: number | null;
+  volume_usd_current: number | null;
   price_change_5m: number | null;
   price_change_1h: number | null;
   price_change_24h: number | null;
-  risk_score: number | null;
+  risk_score_numeric: number | null;
   risk_label: string | null;
-  risk_facts: string[] | null;
-  dex_url: string | null;
+  risk_flags: string[] | null;
+  dex: string | null;
   detected_at: string;
 }
 export const gemApi = {

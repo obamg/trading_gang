@@ -12,6 +12,12 @@ import { gemApi, type GemAlert } from "@/api/modules";
 
 type Risk = "all" | "low" | "medium" | "high";
 
+function formatUsd(val: number): string {
+  if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
+  if (val >= 1_000) return `$${(val / 1_000).toFixed(1)}K`;
+  return `$${val.toFixed(0)}`;
+}
+
 export default function GemRadarPage() {
   const [risk, setRisk] = useState<Risk>("all");
   const { data, isLoading } = useQuery({
@@ -78,33 +84,28 @@ function GemCard({ g }: { g: GemAlert }) {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-base font-semibold">{g.symbol}</span>
             {g.name && <span className="text-xs text-textMuted">{g.name}</span>}
-            {g.chain && <Badge variant="neutral">{g.chain}</Badge>}
+            {g.chain && <Badge variant="neutral">{g.chain.toUpperCase()}</Badge>}
             {g.risk_label && <Badge variant={riskVariant}>{g.risk_label.toUpperCase()} RISK</Badge>}
           </div>
-          {g.risk_facts && g.risk_facts.length > 0 && (
+          {g.risk_flags && g.risk_flags.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {g.risk_facts.map((f) => (
-                <span key={f} className="rounded bg-bgSubtle px-1.5 py-0.5 text-xs text-textMuted">{f}</span>
+              {g.risk_flags.map((f) => (
+                <span key={f} className="rounded bg-bgSubtle px-1.5 py-0.5 text-xs text-textMuted">{f.replace(/_/g, " ")}</span>
               ))}
             </div>
           )}
         </div>
         <div className="flex flex-col items-end gap-1 text-right">
           <div className="font-semibold"><NumberDisplay value={g.price_usd ?? 0} decimals={6} prefix="$" /></div>
-          <div className="text-xs text-textSecondary">MC <NumberDisplay value={g.market_cap_usd ?? 0} decimals={0} prefix="$" /></div>
-          <div className="text-xs text-textSecondary">Liq <NumberDisplay value={g.liquidity_usd ?? 0} decimals={0} prefix="$" /></div>
+          <div className="text-xs text-textSecondary">MC {formatUsd(g.market_cap_usd ?? 0)}</div>
+          <div className="text-xs text-textSecondary">Liq {formatUsd(g.liquidity_usd ?? 0)}</div>
         </div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs sm:gap-4">
         <span>5m: <PercentChange value={g.price_change_5m} /></span>
         <span>1h: <PercentChange value={g.price_change_1h} /></span>
         <span>24h: <PercentChange value={g.price_change_24h} /></span>
-        <span className="text-textMuted">Vol 24h: <NumberDisplay value={g.volume_24h_usd ?? 0} decimals={0} prefix="$" /></span>
-        {g.dex_url && (
-          <a href={g.dex_url} target="_blank" rel="noreferrer" className="ml-auto text-accent hover:underline">
-            Open on DEX →
-          </a>
-        )}
+        <span className="text-textMuted">Vol 24h: {formatUsd(g.volume_24h_usd ?? 0)}</span>
       </div>
     </div>
   );
