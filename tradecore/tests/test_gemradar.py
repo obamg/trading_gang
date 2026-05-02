@@ -41,7 +41,7 @@ def test_mcap_in_range():
 
 
 def test_mcap_below_range():
-    mcap = 500_000.0
+    mcap = 400_000.0
     assert mcap < MIN_MCAP_USD
 
 
@@ -58,7 +58,7 @@ def test_price_change_passes():
 
 
 def test_price_change_rejected():
-    price_change_5m = 5.0
+    price_change_5m = 1.0
     assert price_change_5m < PRICE_CHANGE_THRESHOLD
 
 
@@ -89,36 +89,35 @@ def test_risk_score_accumulation():
     # Unverified contract
     jup_verified = False
     if not jup_verified:
-        score += 30
+        score += 20
         flags.append("unverified_contract")
 
     # No liquidity lock
     lp_locked = False
     if not lp_locked:
-        score += 25
+        score += 15
         flags.append("liquidity_unlocked")
 
     # Mint authority active
     mint_active = True
     if mint_active:
-        score += 20
+        score += 15
         flags.append("mint_active")
 
     # Concentrated holders
     top10_pct = 80.0
     if top10_pct > 70:
-        score += 15
+        score += 10
         flags.append("concentrated_holders")
 
     # Young contract (< 24h)
     age_hours = 6
     if age_hours < 24:
-        score += 10
+        score += 5
         flags.append("young_contract")
 
-    assert score == 100  # all flags → max risk
+    assert score == 65  # all rug-check flags
     assert len(flags) == 5
-    assert min(score, 100) == 100  # clamping
 
 
 def test_risk_score_clean_token():

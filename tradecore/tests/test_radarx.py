@@ -38,6 +38,9 @@ def _mock_db() -> MagicMock:
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock(side_effect=lambda row: setattr(row, "id", "row-uuid"))
+    result = MagicMock()
+    result.scalar_one_or_none = MagicMock(return_value=None)
+    db.execute = AsyncMock(return_value=result)
     return db
 
 
