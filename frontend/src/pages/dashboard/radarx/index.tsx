@@ -72,7 +72,11 @@ export default function RadarXPage() {
 
   const filtered = useMemo(() => {
     if (filter === "all") return combined;
-    return combined.filter(isDivergence);
+    return combined.filter(isDivergence).sort((a, b) => {
+      const scoreDiff = getDivergenceScore(b) - getDivergenceScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      return b.candle_volume_usd - a.candle_volume_usd;
+    });
   }, [combined, filter]);
 
   const divergenceCount = useMemo(() => combined.filter(isDivergence).length, [combined]);
