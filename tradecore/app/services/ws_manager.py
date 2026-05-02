@@ -23,7 +23,7 @@ from app.services import redis_service
 from app.services.telegram_service import service as telegram_service
 
 UNREAD_BUFFER_SIZE = 20
-ALERT_MODULES = ("radarx", "whale", "gemradar", "oracle", "sentiment", "macro", "newspulse")
+ALERT_MODULES = ("radarx", "whaleradar", "gemradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap")
 
 
 class ConnectionManager:
@@ -106,11 +106,16 @@ class ConnectionManager:
                 if msg.get("type") != "message":
                     continue
                 channel = msg.get("channel", "")
+                if isinstance(channel, bytes):
+                    channel = channel.decode()
                 raw = msg.get("data", "")
                 try:
-                    payload = json.loads(raw) if isinstance(raw, str) else raw
-                except ValueError:
+                    if isinstance(raw, bytes):
+                        raw = raw.decode()
+                    payload = json.loads(raw)
+                except (ValueError, UnicodeDecodeError):
                     continue
+                log.info("ws_relay_received", channel=channel, symbol=payload.get("symbol") if isinstance(payload, dict) else None)
                 await self._route_alert(channel, payload)
         except asyncio.CancelledError:
             raise
