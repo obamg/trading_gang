@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 
@@ -59,27 +60,16 @@ async def lifespan(app: FastAPI):
     await redis_service.init_redis()
     await ws_manager.start_relay()
 
-    # Singleton services must only run on one worker. Use a Redis lock so the
-    # first worker to start becomes the leader; the rest skip these services.
+    # Singleton services (binance stream, telegram, liquidation listener,
+    # oracle trigger) must only run on one worker. Self-healing leader
+    # election: a worker holds a Redis lock with a unique token, refreshes
+    # it on a short cadence, and re-attempts acquisition if the lock is
+    # ever lost. Survives non-graceful shutdowns — a stale lock from a
+    # killed container expires within LEADER_TTL_SECONDS and the next
+    # poll picks it up.
     r = redis_service.get_redis()
-    is_leader = await r.set("tradecore:leader", "1", nx=True, ex=300)
-    _leader_refresh: asyncio.Task | None = None
-    if is_leader:
-        async def _keep_leader():
-            try:
-                while True:
-                    await asyncio.sleep(120)
-                    await r.expire("tradecore:leader", 300)
-            except asyncio.CancelledError:
-                pass
-        _leader_refresh = asyncio.create_task(_keep_leader())
-        await binance_manager.start()
-        await telegram_service.start()
-        await liquidation_listener.start()
-        await oracle_trigger.start()
-        log.info("worker_is_leader", singletons="binance,telegram,liquidation,oracle")
-    else:
-        log.info("worker_is_follower", singletons="skipped")
+    leader_stop = asyncio.Event()
+    leader_task = asyncio.create_task(_run_leader_loop(r, leader_stop))
 
     if settings.scheduler_enabled:
         start_scheduler()
@@ -87,18 +77,87 @@ async def lifespan(app: FastAPI):
     yield
     if settings.scheduler_enabled:
         stop_scheduler()
-    if is_leader:
-        await oracle_trigger.stop()
-        await liquidation_listener.stop()
-        await telegram_service.stop()
-        await binance_manager.stop()
-        if _leader_refresh:
-            _leader_refresh.cancel()
-        await r.delete("tradecore:leader")
+    leader_stop.set()
+    try:
+        await leader_task
+    except Exception as e:
+        log.error("leader_task_shutdown_error", err=str(e))
     await ws_manager.stop_relay()
     await redis_service.close_redis()
     await engine.dispose()
     log.info("shutdown_complete")
+
+
+LEADER_KEY = "tradecore:leader"
+LEADER_TTL_SECONDS = 45
+LEADER_POLL_SECONDS = 15
+
+
+async def _run_leader_loop(r, stop_event: asyncio.Event) -> None:
+    """Self-healing leader election. Runs throughout the worker's lifetime.
+
+    - When this worker holds the lock: refresh TTL on each poll.
+    - When it doesn't: try to acquire (NX). If acquired, start singletons.
+    - If the lock is lost (clock skew, network partition): stop singletons.
+    - On lifespan shutdown: stop singletons and release the lock if owned.
+    """
+    token = secrets.token_hex(8)
+    owns = False
+
+    async def _start_singletons() -> None:
+        await binance_manager.start()
+        await telegram_service.start()
+        await liquidation_listener.start()
+        await oracle_trigger.start()
+        log.info("worker_became_leader", token=token)
+
+    async def _stop_singletons() -> None:
+        try:
+            await oracle_trigger.stop()
+            await liquidation_listener.stop()
+            await telegram_service.stop()
+            await binance_manager.stop()
+        except Exception as e:
+            log.error("singleton_stop_error", err=str(e))
+
+    try:
+        while not stop_event.is_set():
+            try:
+                if owns:
+                    current = await r.get(LEADER_KEY)
+                    if isinstance(current, bytes):
+                        current = current.decode()
+                    if current == token:
+                        await r.expire(LEADER_KEY, LEADER_TTL_SECONDS)
+                    else:
+                        log.warning("worker_lost_leadership", token=token, current=current)
+                        owns = False
+                        await _stop_singletons()
+                else:
+                    acquired = await r.set(LEADER_KEY, token, nx=True, ex=LEADER_TTL_SECONDS)
+                    if acquired:
+                        owns = True
+                        await _start_singletons()
+            except Exception as e:
+                log.error("leader_loop_error", err=str(e), owns=owns)
+
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=LEADER_POLL_SECONDS)
+                break
+            except asyncio.TimeoutError:
+                continue
+    finally:
+        if owns:
+            log.info("worker_releasing_leadership", token=token)
+            await _stop_singletons()
+            try:
+                current = await r.get(LEADER_KEY)
+                if isinstance(current, bytes):
+                    current = current.decode()
+                if current == token:
+                    await r.delete(LEADER_KEY)
+            except Exception as e:
+                log.error("leader_release_error", err=str(e))
 
 
 app = FastAPI(
