@@ -6,7 +6,11 @@ from sqlalchemy import case, desc, extract, func, select
 
 from app.dependencies import CurrentUser, DBSession
 from app.models.tradelog import Trade
-from app.modules.performance.aggregator import compute_signal_accuracy, compute_user_performance
+from app.modules.performance.aggregator import (
+    compute_signal_accuracy,
+    compute_user_performance,
+    read_user_performance,
+)
 
 router = APIRouter(
     prefix="/performance", tags=["performance"],
@@ -42,16 +46,32 @@ def _serialize_snap(snap) -> dict:
     }
 
 
+SNAPSHOT_STALE_SECONDS = 15 * 60
+
+
 @router.get("/overview")
 async def overview(
     user: CurrentUser,
     db: DBSession,
     is_paper: bool = Query(default=False),
+    refresh: bool = Query(default=False),
 ):
+    """Return cached performance snapshots per period.
+
+    Reads pre-computed snapshots (refreshed by the scheduler every 15min).
+    Pass `?refresh=true` to force a recompute, or hits with no snapshot yet
+    will compute on demand.
+    """
     periods = ["7d", "30d", "90d", "all"]
     out = {}
+    now = datetime.now(timezone.utc)
     for p in periods:
-        snap = await compute_user_performance(db, user.id, period=p, is_paper=is_paper)
+        snap = None if refresh else await read_user_performance(db, user.id, p, is_paper)
+        is_stale = snap is None or (
+            snap.computed_at and (now - snap.computed_at).total_seconds() > SNAPSHOT_STALE_SECONDS
+        )
+        if snap is None or is_stale or refresh:
+            snap = await compute_user_performance(db, user.id, period=p, is_paper=is_paper)
         out[p] = _serialize_snap(snap)
     return out
 

@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.oracle import OracleOutcome, OracleSignal
 from app.models.performance import PerformanceSnapshot, SignalPerformance
@@ -174,15 +175,11 @@ async def compute_user_performance(
     return snap
 
 
-async def compute_signal_accuracy(db: AsyncSession, module: str = "oracle") -> dict:
-    """Aggregate oracle_outcomes into a SignalPerformance row keyed by module."""
-    # Pull signals+outcomes
-    rows = (
-        await db.execute(
-            select(OracleSignal, OracleOutcome)
-            .join(OracleOutcome, OracleOutcome.signal_id == OracleSignal.id)
-        )
-    ).all()
+SIGNAL_ACCURACY_WINDOW_DAYS = 30
+
+
+def _aggregate_outcomes(rows: list[tuple]) -> dict:
+    """Compute accuracy stats from a list of (signal, outcome) tuples."""
     total = len(rows)
     correct_1h = sum(1 for _, o in rows if o.was_correct_1h is True)
     correct_4h = sum(1 for _, o in rows if o.was_correct_4h is True)
@@ -190,28 +187,169 @@ async def compute_signal_accuracy(db: AsyncSession, module: str = "oracle") -> d
     measured_4h = sum(1 for _, o in rows if o.was_correct_4h is not None)
     moves_1h = [float(o.pnl_1h_pct) for _, o in rows if o.pnl_1h_pct is not None]
     moves_4h = [float(o.pnl_4h_pct) for _, o in rows if o.pnl_4h_pct is not None]
+    return {
+        "total": total,
+        "correct_1h": correct_1h,
+        "correct_4h": correct_4h,
+        "accuracy_1h_pct": (correct_1h / measured_1h * 100) if measured_1h else None,
+        "accuracy_4h_pct": (correct_4h / measured_4h * 100) if measured_4h else None,
+        "avg_move_1h_pct": fmean(moves_1h) if moves_1h else None,
+        "avg_move_4h_pct": fmean(moves_4h) if moves_4h else None,
+    }
 
-    snap = SignalPerformance(
-        module=module,
-        symbol=None,
-        total_signals=total,
-        correct_1h=correct_1h,
-        correct_4h=correct_4h,
-        accuracy_1h_pct=Decimal(str(round(correct_1h / measured_1h * 100, 2))) if measured_1h else None,
-        accuracy_4h_pct=Decimal(str(round(correct_4h / measured_4h * 100, 2))) if measured_4h else None,
-        avg_move_1h_pct=Decimal(str(round(fmean(moves_1h), 2))) if moves_1h else None,
-        avg_move_4h_pct=Decimal(str(round(fmean(moves_4h), 2))) if moves_4h else None,
+
+async def _upsert_signal_perf(
+    db: AsyncSession, module: str, symbol: str | None, stats: dict
+) -> SignalPerformance:
+    """Upsert a SignalPerformance row keyed by (module, symbol).
+
+    Updates the canonical row in place rather than appending — keeps the
+    table size bounded.
+    """
+    existing = (
+        await db.execute(
+            select(SignalPerformance)
+            .where(
+                SignalPerformance.module == module,
+                SignalPerformance.symbol.is_(None) if symbol is None else SignalPerformance.symbol == symbol,
+            )
+            .order_by(desc(SignalPerformance.computed_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    snap = existing or SignalPerformance(module=module, symbol=symbol)
+    snap.total_signals = stats["total"]
+    snap.correct_1h = stats["correct_1h"]
+    snap.correct_4h = stats["correct_4h"]
+    snap.accuracy_1h_pct = (
+        Decimal(str(round(stats["accuracy_1h_pct"], 2))) if stats["accuracy_1h_pct"] is not None else None
     )
-    db.add(snap)
+    snap.accuracy_4h_pct = (
+        Decimal(str(round(stats["accuracy_4h_pct"], 2))) if stats["accuracy_4h_pct"] is not None else None
+    )
+    snap.avg_move_1h_pct = (
+        Decimal(str(round(stats["avg_move_1h_pct"], 2))) if stats["avg_move_1h_pct"] is not None else None
+    )
+    snap.avg_move_4h_pct = (
+        Decimal(str(round(stats["avg_move_4h_pct"], 2))) if stats["avg_move_4h_pct"] is not None else None
+    )
+    snap.computed_at = datetime.now(timezone.utc)
+    if existing is None:
+        db.add(snap)
+    return snap
+
+
+async def compute_signal_accuracy(
+    db: AsyncSession,
+    module: str = "oracle",
+    *,
+    window_days: int = SIGNAL_ACCURACY_WINDOW_DAYS,
+    per_symbol: bool = True,
+) -> dict:
+    """Aggregate oracle_outcomes into SignalPerformance rows.
+
+    Idempotent — upserts a single row per (module, symbol) instead of
+    accumulating. Bounded by `window_days` so older signals don't dilute
+    current accuracy.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+    rows = (
+        await db.execute(
+            select(OracleSignal, OracleOutcome)
+            .join(OracleOutcome, OracleOutcome.signal_id == OracleSignal.id)
+            .where(OracleSignal.signal_at >= since)
+        )
+    ).all()
+
+    overall = _aggregate_outcomes(rows)
+    snap = await _upsert_signal_perf(db, module, None, overall)
+
+    by_symbol: dict[str, dict] = {}
+    if per_symbol:
+        symbols: dict[str, list] = {}
+        for s, o in rows:
+            symbols.setdefault(s.symbol, []).append((s, o))
+        for sym, sym_rows in symbols.items():
+            stats = _aggregate_outcomes(sym_rows)
+            sym_snap = await _upsert_signal_perf(db, module, sym, stats)
+            by_symbol[sym] = {
+                "total_signals": sym_snap.total_signals,
+                "accuracy_1h_pct": float(sym_snap.accuracy_1h_pct) if sym_snap.accuracy_1h_pct else None,
+                "accuracy_4h_pct": float(sym_snap.accuracy_4h_pct) if sym_snap.accuracy_4h_pct else None,
+            }
+
     await db.commit()
     return {
         "module": module,
-        "total_signals": total,
+        "window_days": window_days,
+        "total_signals": snap.total_signals,
         "accuracy_1h_pct": float(snap.accuracy_1h_pct) if snap.accuracy_1h_pct else None,
         "accuracy_4h_pct": float(snap.accuracy_4h_pct) if snap.accuracy_4h_pct else None,
         "avg_move_1h_pct": float(snap.avg_move_1h_pct) if snap.avg_move_1h_pct else None,
         "avg_move_4h_pct": float(snap.avg_move_4h_pct) if snap.avg_move_4h_pct else None,
+        "by_symbol": by_symbol,
     }
 
 
-__all__ = ["compute_user_performance", "compute_signal_accuracy", "PERIODS"]
+async def read_user_performance(
+    db: AsyncSession,
+    user_id: UUID,
+    period: str = "all",
+    is_paper: bool = False,
+) -> PerformanceSnapshot | None:
+    """Return the latest cached snapshot, or None if never computed."""
+    return (
+        await db.execute(
+            select(PerformanceSnapshot)
+            .where(
+                PerformanceSnapshot.user_id == user_id,
+                PerformanceSnapshot.period == period,
+                PerformanceSnapshot.is_paper.is_(is_paper),
+            )
+            .order_by(desc(PerformanceSnapshot.computed_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def refresh_all_users_performance() -> None:
+    """Scheduled job — recompute snapshots for users with recent trade activity.
+
+    Active = at least one trade entered or exited in the last 90 days.
+    Skips dormant accounts to keep the job bounded.
+    """
+    from app.models.user import User
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    async with AsyncSessionLocal() as db:
+        active_user_ids = (
+            await db.execute(
+                select(Trade.user_id)
+                .where(Trade.entry_at >= cutoff)
+                .group_by(Trade.user_id)
+            )
+        ).scalars().all()
+        if not active_user_ids:
+            return
+        for uid in active_user_ids:
+            for is_paper in (False, True):
+                for period in PERIODS.keys():
+                    try:
+                        await compute_user_performance(db, uid, period=period, is_paper=is_paper)
+                    except Exception as e:
+                        log.error(
+                            "performance_refresh_failed",
+                            user_id=str(uid),
+                            period=period,
+                            err=str(e),
+                        )
+
+
+__all__ = [
+    "compute_user_performance",
+    "compute_signal_accuracy",
+    "read_user_performance",
+    "refresh_all_users_performance",
+    "PERIODS",
+]

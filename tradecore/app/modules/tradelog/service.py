@@ -27,11 +27,13 @@ def _compute_pnl(
     size: float,
     fees_usd: float | None,
     stop_loss_price: float | None,
+    funding_paid_usd: float | None = None,
 ) -> dict:
     mul = _direction_mul(side)
     pnl_usd = (exit_price - entry_price) * size * mul
     fees = float(fees_usd or 0)
-    net = pnl_usd - fees
+    funding = float(funding_paid_usd or 0)
+    net = pnl_usd - fees - funding
     notional = entry_price * size
     pnl_pct = (pnl_usd / notional * 100) if notional else 0.0
     r_multiple: float | None = None
@@ -45,6 +47,7 @@ def _compute_pnl(
         "pnl_pct": round(pnl_pct, 4),
         "fees_usd": round(fees, 2) if fees_usd is not None else None,
         "net_pnl_usd": round(net, 2),
+        "funding_paid_usd": round(funding, 2) if funding_paid_usd is not None else None,
         "r_multiple": round(r_multiple, 2) if r_multiple is not None else None,
     }
 
@@ -106,10 +109,11 @@ async def update_trade(db: AsyncSession, user_id: UUID, trade_id: UUID, updates:
 
     # Simple field updates
     for field in ("notes", "setup_name", "emotion", "followed_oracle",
-                  "take_profit_price", "stop_loss_price"):
+                  "take_profit_price", "stop_loss_price", "exit_reason",
+                  "fees_usd", "funding_paid_usd"):
         if field in updates and updates[field] is not None:
             val = updates[field]
-            if field in ("take_profit_price", "stop_loss_price"):
+            if field in ("take_profit_price", "stop_loss_price", "fees_usd", "funding_paid_usd"):
                 val = Decimal(str(val))
             setattr(row, field, val)
 
@@ -121,25 +125,29 @@ async def update_trade(db: AsyncSession, user_id: UUID, trade_id: UUID, updates:
             exit_at = exit_at_raw if exit_at_raw.tzinfo else exit_at_raw.replace(tzinfo=timezone.utc)
         else:
             exit_at = datetime.now(timezone.utc)
-        fees = updates.get("fees_usd")
+        # Use values already on the row (set above or set in earlier PATCH).
+        # _compute_pnl needs current values to recompute net.
+        fees = float(row.fees_usd) if row.fees_usd is not None else None
+        funding = float(row.funding_paid_usd) if row.funding_paid_usd is not None else None
         pnl = _compute_pnl(
             side=row.side,
             entry_price=float(row.entry_price),
             exit_price=exit_price,
             size=float(row.size),
-            fees_usd=float(fees) if fees is not None else None,
+            fees_usd=fees,
             stop_loss_price=float(row.stop_loss_price) if row.stop_loss_price else None,
+            funding_paid_usd=funding,
         )
         row.exit_price = Decimal(str(exit_price))
         row.exit_at = exit_at
         row.pnl_usd = Decimal(str(pnl["pnl_usd"]))
         row.pnl_pct = Decimal(str(pnl["pnl_pct"]))
-        if pnl["fees_usd"] is not None:
-            row.fees_usd = Decimal(str(pnl["fees_usd"]))
         row.net_pnl_usd = Decimal(str(pnl["net_pnl_usd"]))
         if pnl["r_multiple"] is not None:
             row.r_multiple = Decimal(str(pnl["r_multiple"]))
         row.status = "closed"
+        if row.entry_at and exit_at:
+            row.hold_duration_seconds = int((exit_at - row.entry_at).total_seconds())
 
     if "tags_add" in updates and updates["tags_add"]:
         for tag in updates["tags_add"]:
@@ -185,6 +193,9 @@ def serialize(row: Trade, tags: list[str] | None = None) -> dict:
         "fees_usd": float(row.fees_usd) if row.fees_usd else None,
         "net_pnl_usd": float(row.net_pnl_usd) if row.net_pnl_usd else None,
         "r_multiple": float(row.r_multiple) if row.r_multiple else None,
+        "funding_paid_usd": float(row.funding_paid_usd) if row.funding_paid_usd else None,
+        "hold_duration_seconds": row.hold_duration_seconds,
+        "exit_reason": row.exit_reason,
         "setup_name": row.setup_name,
         "notes": row.notes,
         "emotion": row.emotion,

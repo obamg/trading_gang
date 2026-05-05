@@ -10,6 +10,8 @@ from sqlalchemy import and_, desc, func, select
 from app.dependencies import CurrentUser, DBSession
 from app.errors import AppError
 from app.models.tradelog import Trade, TradeTag
+from app.modules.macropulse.gating import check_macro_gates
+from app.modules.performance.behavior import check_behavioral_gates
 from app.modules.tradelog import service
 
 router = APIRouter(
@@ -42,6 +44,8 @@ class TradeUpdate(BaseModel):
     exit_price: float | None = Field(default=None, gt=0)
     exit_at: datetime | None = None
     fees_usd: float | None = Field(default=None, ge=0)
+    funding_paid_usd: float | None = Field(default=None, ge=0)
+    exit_reason: str | None = None
     stop_loss_price: float | None = None
     take_profit_price: float | None = None
     notes: str | None = None
@@ -89,6 +93,14 @@ async def list_trades(
 
 @router.post("/trades")
 async def create(payload: TradeCreate, user: CurrentUser, db: DBSession):
+    gate = await check_macro_gates()
+    if not gate["can_trade"]:
+        raise AppError(403, gate["reason"], "MACRO_GATE_BLOCKED")
+    behavior = await check_behavioral_gates(db, user.id)
+    if not behavior["can_trade"]:
+        warnings = behavior["warnings"]
+        msg = warnings[0]["recommendation"] if warnings else "Behavioral gate triggered"
+        raise AppError(403, msg, "BEHAVIOR_GATE_BLOCKED")
     data = payload.model_dump()
     trade = await service.create_trade(db, user.id, data)
     return service.serialize(trade, tags=await _tags_for(db, trade.id))
