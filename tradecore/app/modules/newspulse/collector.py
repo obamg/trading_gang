@@ -1,12 +1,20 @@
 """NewsPulse — crypto news aggregator.
 
-Fetches news from CoinGecko News API every 5 minutes. Stores articles in DB,
+Polls a small set of free RSS feeds every 5 minutes. Stores articles in DB,
 publishes high-impact items via Redis pubsub and Telegram.
+
+Switched from CoinGecko News API after they moved that endpoint behind a
+PRO-only paywall in 2026. RSS gives us ~95% of the price-moving stories
+from the same sources for free, with no auth and no quota.
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import re
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from xml.etree import ElementTree as ET
 
 import httpx
 from sqlalchemy import select
@@ -17,7 +25,13 @@ from app.logging_config import log
 from app.models.news import NewsArticle
 from app.services import redis_service
 
-COINGECKO_NEWS_URL = "https://api.coingecko.com/api/v3/news"
+RSS_FEEDS = (
+    ("Cointelegraph", "https://cointelegraph.com/rss"),
+    ("Decrypt", "https://decrypt.co/feed"),
+    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+)
+RSS_USER_AGENT = "Mozilla/5.0 (compatible; TradeCore-NewsPulse/1.0)"
+HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 BULLISH_WORDS = {
     "surge", "surges", "surging", "soar", "soars", "soaring", "rally", "rallies",
@@ -85,12 +99,85 @@ def _extract_coins(title: str, description: str) -> list[str]:
     return coins
 
 
-async def fetch_news() -> list[dict]:
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(COINGECKO_NEWS_URL, params={"page": 1})
+def _strip_html(text: str) -> str:
+    if not text:
+        return ""
+    return HTML_TAG_RE.sub("", text).strip()
+
+
+def _parse_pub_date(raw: str | None) -> datetime:
+    if not raw:
+        return datetime.now(timezone.utc)
+    try:
+        dt = parsedate_to_datetime(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError):
+        return datetime.now(timezone.utc)
+
+
+def _parse_rss_xml(xml_text: str, source_name: str) -> list[dict]:
+    """Parse an RSS 2.0 feed body into a list of raw article dicts.
+
+    Source IDs are sha1(guid or link) truncated to 40 chars to fit the
+    news_articles.source_id column (varchar 64).
+    """
+    items: list[dict] = []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as e:
+        log.warning("newspulse_rss_parse_failed", source=source_name, err=str(e))
+        return items
+
+    channel = root.find("channel")
+    if channel is None:
+        return items
+
+    for item in channel.findall("item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        guid = (item.findtext("guid") or link).strip()
+        if not title or not link:
+            continue
+
+        description = _strip_html(item.findtext("description") or "")
+        pub_date = _parse_pub_date(item.findtext("pubDate"))
+        # sha1 → 40 hex chars, fits in varchar(64) and stable across runs
+        source_id = hashlib.sha1(guid.encode("utf-8")).hexdigest()
+
+        items.append({
+            "id": source_id,
+            "title": title,
+            "description": description,
+            "url": link,
+            "source_name": source_name,
+            "published_at": pub_date,
+        })
+    return items
+
+
+async def _fetch_one_feed(client: httpx.AsyncClient, source_name: str, url: str) -> list[dict]:
+    try:
+        resp = await client.get(url, headers={"User-Agent": RSS_USER_AGENT})
         resp.raise_for_status()
-        data = resp.json()
-    return data.get("data", [])
+    except httpx.HTTPError as e:
+        log.warning("newspulse_rss_fetch_failed", source=source_name, err=str(e))
+        return []
+    return _parse_rss_xml(resp.text, source_name)
+
+
+async def fetch_news() -> list[dict]:
+    """Fan out across all configured RSS feeds in parallel."""
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        results = await asyncio.gather(
+            *(_fetch_one_feed(client, name, url) for name, url in RSS_FEEDS),
+            return_exceptions=False,
+        )
+    articles: list[dict] = []
+    for batch in results:
+        articles.extend(batch)
+    return articles
 
 
 def _parse_article(raw: dict) -> dict:
@@ -99,18 +186,13 @@ def _parse_article(raw: dict) -> dict:
     coins = _extract_coins(title, description)
     sentiment = _score_sentiment(title, description)
     importance = _score_importance(title, description)
-
-    created_at = raw.get("created_at")
-    if isinstance(created_at, (int, float)):
-        pub_dt = datetime.fromtimestamp(created_at, tz=timezone.utc)
-    else:
-        pub_dt = datetime.now(timezone.utc)
+    pub_dt = raw.get("published_at") or datetime.now(timezone.utc)
 
     return {
         "source_id": str(raw.get("id", "")),
         "title": title,
         "url": raw.get("url", ""),
-        "source_name": raw.get("news_site", "Unknown"),
+        "source_name": raw.get("source_name", "Unknown"),
         "sentiment": sentiment,
         "importance": importance,
         "coins": ",".join(coins) if coins else None,
@@ -167,20 +249,11 @@ async def collect_news() -> int:
                 row.notified = True
             await db.commit()
 
-    log.info("newspulse_collected", total=len(parsed), inserted=inserted)
+    log.info("newspulse_collected", total=len(parsed), inserted=inserted, sources=len(RSS_FEEDS))
     return inserted
 
 
 async def _notify_telegram(tg, alert_data: dict) -> None:
-    sentiment_emoji = {"bullish": "🟢", "bearish": "🔴"}.get(alert_data.get("sentiment", ""), "⚪")
-    coins = alert_data.get("coins") or ""
-    coin_tag = f" [{coins}]" if coins else ""
-    text = (
-        f"📰 *NewsPulse — {alert_data.get('importance', '').upper()}*{coin_tag}\n"
-        f"{sentiment_emoji} {alert_data['title']}\n"
-        f"Source: {alert_data.get('source', '?')}\n"
-        f"[Read more]({alert_data['url']})"
-    )
     try:
         r = redis_service.get_redis()
         chat_ids_raw = await r.smembers("telegram:chat_ids")
