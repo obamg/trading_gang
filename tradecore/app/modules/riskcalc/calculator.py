@@ -20,6 +20,21 @@ class RiskInput:
     maintenance_margin_rate: float = 0.004  # Binance smallest tier default (0.4%)
 
 
+def _get_mmr_for_notional(notional_usd: float) -> float:
+    """Binance USDⓈ-M tiered maintenance margin rate."""
+    if notional_usd < 50_000:
+        return 0.004
+    if notional_usd < 250_000:
+        return 0.005
+    if notional_usd < 1_000_000:
+        return 0.0065
+    if notional_usd < 5_000_000:
+        return 0.01
+    if notional_usd < 20_000_000:
+        return 0.025
+    return 0.05
+
+
 def calculate_position(params: RiskInput) -> dict:
     balance = float(params.account_balance_usd)
     risk_pct = float(params.risk_pct)
@@ -56,9 +71,8 @@ def calculate_position(params: RiskInput) -> dict:
         position_size_units = position_size_usd / entry
 
     # Liquidation price (isolated margin, includes maintenance margin rate).
-    # Maintenance margin rate varies by position size tier on Binance (0.4% - 5%).
     liquidation_price: float | None = None
-    mmr = params.maintenance_margin_rate
+    mmr = _get_mmr_for_notional(position_size_usd) if params.asset_type == "futures" else 0.0
     if params.asset_type == "futures" and leverage > 1:
         if side == "long":
             liquidation_price = entry * (1 - 1 / leverage + mmr)

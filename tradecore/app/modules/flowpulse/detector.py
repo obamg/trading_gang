@@ -24,7 +24,7 @@ from app.logging_config import log
 from app.models.flowpulse import FlowSignal
 from app.services import redis_service
 
-SMOOTHING_WINDOW = 5  # average last 5 snapshots = 10 minutes
+SMOOTHING_WINDOW = 2  # average last 2 snapshots = 2 minutes
 
 DEPTH_URL = f"{settings.binance_rest_url}/fapi/v1/depth"
 TAKER_URL = f"{settings.binance_rest_url}/futures/data/takerlongshortRatio"
@@ -33,8 +33,8 @@ TOP_POSITION_URL = f"{settings.binance_rest_url}/futures/data/topLongShortPositi
 MAX_SYMBOLS = 30
 
 # Thresholds
-BOOK_IMBALANCE_ALERT = 3.0
-TAKER_RATIO_ALERT = 2.0
+BOOK_IMBALANCE_ALERT = 2.5
+TAKER_RATIO_ALERT = 1.8
 TOP_RATIO_EXTREME = 70.0
 
 REDIS_TTL = 180
@@ -46,7 +46,7 @@ def _clip01(x: float) -> float:
 
 async def _fetch_depth(client: httpx.AsyncClient, symbol: str) -> dict | None:
     try:
-        resp = await client.get(DEPTH_URL, params={"symbol": symbol, "limit": 5})
+        resp = await client.get(DEPTH_URL, params={"symbol": symbol, "limit": 20})
         resp.raise_for_status()
         data = resp.json()
         bids = sum(float(p) * float(q) for p, q in data.get("bids", []))

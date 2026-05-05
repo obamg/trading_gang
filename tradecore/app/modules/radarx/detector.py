@@ -85,7 +85,7 @@ async def _get_candles(symbol: str, limit: int = 21) -> list[dict]:
 DEFAULT_Z_THRESHOLD = 3.0
 DEFAULT_RATIO_THRESHOLD = 4.0
 DEFAULT_MIN_VOLUME_24H = 10_000_000.0
-COOLDOWN_MINUTES = 30
+COOLDOWN_MINUTES = 15
 DIVERGENCE_MAX_PRICE_PCT = 1.0
 
 
@@ -151,6 +151,7 @@ async def detect_symbol(
 
     z_score = (current_vol - mean_vol) / std_vol if std_vol > 0 else 0.0
     ratio = current_vol / mean_vol
+    rank_pct = sum(1 for v in baseline_vols if v <= current_vol) / len(baseline_vols) * 100
 
     if z_score < z_threshold or ratio < ratio_threshold:
         return None
@@ -179,6 +180,7 @@ async def detect_symbol(
         "price": price,
         "price_change_pct": round(price_change_pct, 2),
         "volume_24h_usd": volume_24h_usd,
+        "rank_pct": round(rank_pct, 1),
         "is_divergence": is_divergence,
         "divergence_score": div_score if is_divergence else None,
         "triggered_at": triggered_at.isoformat(),

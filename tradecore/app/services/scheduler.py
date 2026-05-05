@@ -15,11 +15,13 @@ from app.logging_config import log
 from app.modules.gemradar import detector as gemradar_detector
 from app.modules.macropulse import collector as macropulse_collector
 from app.modules.oracle import engine as oracle_engine
+from app.modules.performance import aggregator as performance_aggregator
 from app.modules.radarx import detector as radarx_detector
 from app.modules.sentimentpulse import collector as sentiment_collector
 from app.modules.flowpulse import detector as flowpulse_detector
 from app.modules.newspulse import collector as newspulse_collector
 from app.modules.liquidmap import tracker as liquidmap_tracker
+from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.services import redis_service
 
@@ -54,7 +56,7 @@ def start_scheduler() -> AsyncIOScheduler:
     if _scheduler is not None:
         return _scheduler
     sched = AsyncIOScheduler(timezone="UTC")
-    sched.add_job(run_radarx_scan, "interval", minutes=5, id="radarx_scan", coalesce=True, max_instances=1)
+    sched.add_job(run_radarx_scan, "interval", minutes=2, id="radarx_scan", coalesce=True, max_instances=1)
     sched.add_job(
         whaleradar_detector.run_large_trade_scan,
         "interval",
@@ -106,8 +108,16 @@ def start_scheduler() -> AsyncIOScheduler:
     sched.add_job(
         flowpulse_detector.run_scheduled_scan,
         "interval",
-        minutes=2,
+        minutes=1,
         id="flowpulse_scan",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        positionmonitor.run_position_check,
+        "interval",
+        seconds=30,
+        id="position_monitor",
         coalesce=True,
         max_instances=1,
     )
@@ -159,6 +169,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=5,
         id="oracle_outcomes",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        performance_aggregator.refresh_all_users_performance,
+        "interval",
+        minutes=15,
+        id="performance_refresh",
         coalesce=True,
         max_instances=1,
     )

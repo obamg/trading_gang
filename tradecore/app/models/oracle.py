@@ -61,6 +61,8 @@ class OracleOutcome(Base):
     pnl_24h_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     was_correct_1h: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     was_correct_4h: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    mfe_1h_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    mae_1h_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     measured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = created_at_col()
 

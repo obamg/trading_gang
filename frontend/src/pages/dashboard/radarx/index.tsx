@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -17,6 +17,60 @@ import { MODULE_BY_KEY } from "@/components/layout/modules";
 
 type FeedFilter = "all" | "divergence";
 
+type SymbolCount = { symbol: string; count: number; avgScore: number };
+
+function SymbolOccurrences({
+  items,
+  onSelect,
+  selected,
+}: {
+  items: SymbolCount[];
+  onSelect: (s: string | null) => void;
+  selected: string | null;
+}) {
+  if (items.length === 0) return null;
+  const max = items[0].count;
+  return (
+    <div className="border-b border-borderSubtle bg-bgElevated px-4 py-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold text-textSecondary">
+          Asset Frequency ({items.length} symbols)
+        </span>
+        {selected && (
+          <button
+            onClick={() => onSelect(null)}
+            className="text-xs text-primary-400 hover:underline"
+          >
+            Clear filter
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((s) => (
+          <button
+            key={s.symbol}
+            onClick={() => onSelect(selected === s.symbol ? null : s.symbol)}
+            className={`group flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
+              selected === s.symbol
+                ? "bg-primary-subtle ring-1 ring-primary-400"
+                : "bg-bgBase hover:bg-bgHover"
+            }`}
+          >
+            <span className="font-semibold text-textPrimary">{s.symbol.replace("USDT", "")}</span>
+            <span className="tabular-nums text-textMuted">{s.count}x</span>
+            <div className="relative h-1.5 w-8 overflow-hidden rounded-full bg-borderSubtle">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-warning"
+                style={{ width: `${(s.count / max) * 100}%` }}
+              />
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function getDivergenceScore(a: RadarXAlert): number {
   if (a.divergence_score != null) return a.divergence_score;
   const absPct = Math.abs(a.price_change_pct ?? 0);
@@ -33,6 +87,7 @@ function isDivergence(a: RadarXAlert): boolean {
 export default function RadarXPage() {
   const nav = useNavigate();
   const [filter, setFilter] = useState<FeedFilter>("all");
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const { data: stats } = useQuery({ queryKey: ["radarx", "stats"], queryFn: radarxApi.stats });
   const { data: alertsData, isLoading: loadingAlerts } = useQuery({
     queryKey: ["radarx", "alerts"],
@@ -70,16 +125,39 @@ export default function RadarXPage() {
     );
   }, [liveAlerts, alertsData]);
 
-  const filtered = useMemo(() => {
-    if (filter === "all") return combined;
-    return combined.filter(isDivergence).sort((a, b) => {
-      const scoreDiff = getDivergenceScore(b) - getDivergenceScore(a);
-      if (scoreDiff !== 0) return scoreDiff;
-      return b.candle_volume_usd - a.candle_volume_usd;
-    });
-  }, [combined, filter]);
+  const divergences = useMemo(
+    () =>
+      combined.filter(isDivergence).sort((a, b) => {
+        const scoreDiff = getDivergenceScore(b) - getDivergenceScore(a);
+        if (scoreDiff !== 0) return scoreDiff;
+        return b.candle_volume_usd - a.candle_volume_usd;
+      }),
+    [combined],
+  );
 
-  const divergenceCount = useMemo(() => combined.filter(isDivergence).length, [combined]);
+  const symbolCounts = useMemo<SymbolCount[]>(() => {
+    const map = new Map<string, { count: number; totalScore: number }>();
+    for (const a of divergences) {
+      const prev = map.get(a.symbol) ?? { count: 0, totalScore: 0 };
+      map.set(a.symbol, { count: prev.count + 1, totalScore: prev.totalScore + getDivergenceScore(a) });
+    }
+    return Array.from(map.entries())
+      .map(([symbol, { count, totalScore }]) => ({ symbol, count, avgScore: totalScore / count }))
+      .sort((a, b) => b.count - a.count || b.avgScore - a.avgScore);
+  }, [divergences]);
+
+  const handleSymbolSelect = useCallback((s: string | null) => {
+    setSelectedSymbol(s);
+    if (s && filter !== "divergence") setFilter("divergence");
+  }, [filter]);
+
+  const filtered = useMemo(() => {
+    const base = filter === "all" ? combined : divergences;
+    if (selectedSymbol) return base.filter((a) => a.symbol === selectedSymbol);
+    return base;
+  }, [combined, divergences, filter, selectedSymbol]);
+
+  const divergenceCount = divergences.length;
 
   const lastUpdated = useMemo(() => {
     if (combined.length === 0) return null;
@@ -125,13 +203,20 @@ export default function RadarXPage() {
                 { key: "divergence", label: `Divergence (${divergenceCount})` },
               ]}
               active={filter}
-              onChange={(k) => setFilter(k as FeedFilter)}
+              onChange={(k) => { setFilter(k as FeedFilter); setSelectedSymbol(null); }}
             />
           </CardHeader>
           {filter === "divergence" && (
-            <div className="border-b border-borderSubtle bg-bgElevated px-4 py-2 text-xs text-textSecondary">
-              Volume spike (Z &ge; 3) with price move &lt; 1% — accumulation before a move.
-            </div>
+            <>
+              <div className="border-b border-borderSubtle bg-bgElevated px-4 py-2 text-xs text-textSecondary">
+                Volume spike (Z &ge; 3) with price move &lt; 1% — accumulation before a move.
+              </div>
+              <SymbolOccurrences
+                items={symbolCounts}
+                onSelect={handleSymbolSelect}
+                selected={selectedSymbol}
+              />
+            </>
           )}
           <CardBody className="flex flex-col gap-2">
             {loadingAlerts ? (

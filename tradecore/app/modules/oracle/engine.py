@@ -22,6 +22,7 @@ from app.models.sentiment import SentimentSnapshot
 from app.models.whaleradar import OISurgeEvent, WhaleTrade
 from app.modules.flowpulse.detector import get_flow_signal
 from app.modules.liquidmap.tracker import get_heatmap
+from app.modules.macropulse.gating import check_macro_gates
 from app.modules.macropulse.score import compute_macro_context
 from app.services import redis_service
 
@@ -79,6 +80,8 @@ async def _radarx_signal(db: AsyncSession, symbol: str) -> dict:
 
 
 async def _whaleradar_signal(db: AsyncSession, symbol: str) -> dict:
+    from app.modules.whaleradar.detector import detect_accumulation_pattern
+
     since_trade = datetime.now(timezone.utc) - timedelta(minutes=10)
     trade = (
         await db.execute(
@@ -115,15 +118,26 @@ async def _whaleradar_signal(db: AsyncSession, symbol: str) -> dict:
 
     if oi is not None:
         oi_dir_raw = (oi.direction or "").lower()
-        if oi_dir_raw == "long_heavy":
+        if oi_dir_raw in ("long_heavy", "oi_unwind_bullish"):
             oi_dir = 1
-        elif oi_dir_raw == "short_heavy":
+        elif oi_dir_raw in ("short_heavy", "oi_unwind_bearish"):
             oi_dir = -1
         else:
             oi_dir = 0
         direction_score += oi_dir
         intensity += _clip01(abs(float(oi.oi_change_pct)) / 20.0)
         detail["oi"] = {"direction": oi_dir_raw, "change_pct": float(oi.oi_change_pct)}
+
+    # Accumulation pattern bonus: boosts conviction when repeated trades detected
+    pattern = await detect_accumulation_pattern(db, symbol)
+    if pattern is not None:
+        bonus = 0.2 * pattern["conviction"]
+        if pattern["side"] == "buy":
+            direction_score += 1
+        else:
+            direction_score -= 1
+        intensity += bonus
+        detail["accumulation"] = pattern
 
     intensity = _clip01(intensity)
     return {
@@ -447,6 +461,12 @@ async def generate_signal(
     if current_price <= 0:
         return None
 
+    # Macro gate: suppress weak signals during unfavorable conditions
+    gate = await check_macro_gates()
+    if not gate["can_trade"] and abs(int(live["score"])) < 75:
+        log.info("oracle_signal_suppressed_macro", symbol=sym, reason=gate.get("reason"))
+        return None
+
     # Trade params only make sense for directional recs
     direction = (
         "bullish" if live["score"] > 0
@@ -532,6 +552,42 @@ async def generate_signal(
 
 # ---------- outcome measurement ----------
 
+
+async def _compute_mfe_mae(symbol: str, signal_at: datetime, window_minutes: int) -> tuple[float | None, float | None]:
+    """Compute max favorable/adverse excursion from candles in the window."""
+    candles = await redis_service.get_candles(symbol, limit=50)
+    if not candles:
+        return None, None
+    signal_ts = signal_at.timestamp() * 1000
+    end_ts = (signal_at + timedelta(minutes=window_minutes)).timestamp() * 1000
+
+    signal_price: float | None = None
+    high_max = 0.0
+    low_min = float("inf")
+
+    for c in reversed(candles):
+        ct = float(c.get("t") or c.get("open_time") or 0)
+        if ct < signal_ts:
+            continue
+        if ct > end_ts:
+            break
+        if signal_price is None:
+            signal_price = float(c.get("o") or c.get("open") or 0)
+        h = float(c.get("h") or c.get("high") or 0)
+        l = float(c.get("l") or c.get("low") or 0)
+        if h > high_max:
+            high_max = h
+        if l < low_min:
+            low_min = l
+
+    if signal_price is None or signal_price <= 0:
+        return None, None
+
+    mfe = (high_max - signal_price) / signal_price * 100
+    mae = (signal_price - low_min) / signal_price * 100
+    return mfe, mae
+
+
 async def measure_outcomes() -> int:
     """Scheduled job: backfill price_15m/1h/4h/24h for signals that have matured.
 
@@ -587,15 +643,17 @@ async def measure_outcomes() -> int:
             await _maybe("price_4h", 240)
             await _maybe("price_24h", 24 * 60)
 
-            # Correctness checks — only when we just filled the slot
+            # Correctness checks — require meaningful move, not just > 0
             if out.price_1h is not None and out.was_correct_1h is None:
                 long_like = sig.recommendation in ("long", "strong_long", "watch_long")
                 short_like = sig.recommendation in ("short", "strong_short", "watch_short")
                 pct = float(out.pnl_1h_pct or 0)
+                # Strong signals need > 0.3% move; weak signals > 0.1%
+                min_move = 0.3 if "strong" in (sig.recommendation or "") else 0.1
                 if long_like:
-                    out.was_correct_1h = pct > 0
+                    out.was_correct_1h = pct > min_move
                 elif short_like:
-                    out.was_correct_1h = pct < 0
+                    out.was_correct_1h = pct < -min_move
                 else:
                     out.was_correct_1h = None
                 changed = True
@@ -604,13 +662,22 @@ async def measure_outcomes() -> int:
                 long_like = sig.recommendation in ("long", "strong_long", "watch_long")
                 short_like = sig.recommendation in ("short", "strong_short", "watch_short")
                 pct = float(out.pnl_4h_pct or 0)
+                min_move = 0.5 if "strong" in (sig.recommendation or "") else 0.2
                 if long_like:
-                    out.was_correct_4h = pct > 0
+                    out.was_correct_4h = pct > min_move
                 elif short_like:
-                    out.was_correct_4h = pct < 0
+                    out.was_correct_4h = pct < -min_move
                 else:
                     out.was_correct_4h = None
                 changed = True
+
+            # MFE/MAE: max favorable/adverse excursion within 1h window
+            if out.price_1h is not None and out.mfe_1h_pct is None:
+                mfe, mae = await _compute_mfe_mae(sig.symbol, sig.signal_at, 60)
+                if mfe is not None:
+                    out.mfe_1h_pct = Decimal(str(round(mfe, 4)))
+                    out.mae_1h_pct = Decimal(str(round(mae, 4)))
+                    changed = True
 
             if changed:
                 out.measured_at = now

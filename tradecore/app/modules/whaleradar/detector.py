@@ -8,7 +8,7 @@ Three independent detectors:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings as app_settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
+from app.models.whale_entity import WhaleEntity, WhaleEntityAddress
 from app.models.whaleradar import OISurgeEvent, WhaleOnchainTransfer, WhaleTrade
 from app.services import redis_service
 
@@ -123,10 +124,10 @@ async def scan_oi_surges(db: AsyncSession, symbols: list[str] | None = None) -> 
                 direction = "long_heavy"
             elif change_pct > 0 and price_change < 0:
                 direction = "short_heavy"
-            elif change_pct < 0 and price_change < 0:
-                direction = "oi_unwind"
+            elif change_pct < 0 and price_change >= 0:
+                direction = "oi_unwind_bullish"
             else:
-                direction = "oi_unwind"
+                direction = "oi_unwind_bearish"
 
             row = OISurgeEvent(
                 symbol=symbol,
@@ -230,6 +231,7 @@ async def poll_onchain_transfers(db: AsyncSession) -> list[dict]:
             await db.rollback()
             continue
         await db.refresh(row)
+        entity_info = await _resolve_entity(db, row.from_address, row.to_address)
         alert = {
             "module": "whaleradar",
             "type": "onchain_transfer",
@@ -239,6 +241,7 @@ async def poll_onchain_transfers(db: AsyncSession) -> list[dict]:
             "transfer_type": transfer_type,
             "chain": row.chain,
             "detected_at": detected_at.isoformat(),
+            **entity_info,
         }
         await redis_service.publish_alert("whaleradar", alert)
         log.info("whaleradar_onchain", asset=row.asset, usd=float(row.amount_usd), type=transfer_type)
@@ -246,6 +249,83 @@ async def poll_onchain_transfers(db: AsyncSession) -> list[dict]:
     if newest_ts:
         await r.set(cursor_key, newest_ts)
     return fired
+
+
+# ---------- entity resolution ----------
+
+
+async def _resolve_entity(db: AsyncSession, from_addr: str | None, to_addr: str | None) -> dict:
+    """Look up known whale entities by address. Returns enrichment fields."""
+    for addr in (from_addr, to_addr):
+        if not addr:
+            continue
+        result = await db.execute(
+            select(WhaleEntityAddress).where(WhaleEntityAddress.address == addr)
+        )
+        link = result.scalar_one_or_none()
+        if link is None:
+            continue
+        entity_result = await db.execute(
+            select(WhaleEntity).where(WhaleEntity.id == link.entity_id)
+        )
+        entity = entity_result.scalar_one_or_none()
+        if entity:
+            entity.total_transfers += 1
+            entity.last_seen_at = datetime.now(timezone.utc)
+            await db.commit()
+            return {
+                "entity_name": entity.name,
+                "entity_type": entity.entity_type,
+                "entity_conviction": float(entity.conviction_score) if entity.conviction_score else None,
+            }
+    return {}
+
+
+# ---------- accumulation pattern detection ----------
+
+ACCUMULATION_LOOKBACK_MINUTES = 60
+ACCUMULATION_MIN_TRADES = 3
+
+
+async def detect_accumulation_pattern(db: AsyncSession, symbol: str) -> dict | None:
+    """Detect if recent whale trades show accumulation or distribution."""
+    from sqlalchemy import desc as sql_desc
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=ACCUMULATION_LOOKBACK_MINUTES)
+    trades = (
+        await db.execute(
+            select(WhaleTrade)
+            .where(WhaleTrade.symbol == symbol, WhaleTrade.detected_at >= cutoff)
+            .order_by(sql_desc(WhaleTrade.detected_at))
+        )
+    ).scalars().all()
+
+    if len(trades) < ACCUMULATION_MIN_TRADES:
+        return None
+
+    buy_count = sum(1 for t in trades if t.side == "buy")
+    sell_count = len(trades) - buy_count
+    total_buy_usd = sum(float(t.trade_size_usd) for t in trades if t.side == "buy")
+    total_sell_usd = sum(float(t.trade_size_usd) for t in trades if t.side == "sell")
+
+    if buy_count >= ACCUMULATION_MIN_TRADES and buy_count > sell_count:
+        return {
+            "symbol": symbol,
+            "pattern": "accumulation",
+            "side": "buy",
+            "trade_count": buy_count,
+            "total_usd": round(total_buy_usd, 2),
+            "conviction": min(buy_count / 5.0, 1.0),
+        }
+    elif sell_count >= ACCUMULATION_MIN_TRADES and sell_count > buy_count:
+        return {
+            "symbol": symbol,
+            "pattern": "distribution",
+            "side": "sell",
+            "trade_count": sell_count,
+            "total_usd": round(total_sell_usd, 2),
+            "conviction": min(sell_count / 5.0, 1.0),
+        }
+    return None
 
 
 # ---------- convenience wrappers for scheduler ----------
