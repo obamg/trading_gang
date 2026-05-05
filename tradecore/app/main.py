@@ -211,7 +211,15 @@ async def health():
         else:
             import json as _json
             candle = _json.loads(raw)
-            ts = candle.get("close_time") or candle.get("open_time") or 0
+            # candles are stored with single-letter Binance kline keys:
+            # T = close time, t = open time (both ms since epoch)
+            ts = (
+                candle.get("T")
+                or candle.get("t")
+                or candle.get("close_time")
+                or candle.get("open_time")
+                or 0
+            )
             # ms → s if needed
             ts_s = ts / 1000 if ts > 10_000_000_000 else ts
             age_s = time.time() - ts_s
