@@ -7,7 +7,6 @@ Streams per symbol:
   <symbol>@kline_5m    closed 5m candles → candles:{symbol}
   <symbol>@aggTrade    aggregate trades  → trades:{symbol}
   <symbol>@forceOrder  liquidations      → pubsub "liquidations" + heatmap
-  <symbol>@bookTicker  best bid/ask      → bookticker:{symbol} hash (optional)
 
 Binance allows up to 200 streams per connection; we shard symbols across
 multiple concurrent WS connections. Symbol list is refreshed hourly from the
@@ -27,7 +26,7 @@ from app.config import settings
 from app.logging_config import log
 from app.services import redis_service
 
-STREAMS_PER_SYMBOL = ("kline_5m", "aggTrade", "forceOrder", "bookTicker")
+STREAMS_PER_SYMBOL = ("kline_5m", "aggTrade", "forceOrder")
 MAX_STREAMS_PER_CONN = 180  # Binance limit is 200 — leave headroom
 REST_TIMEOUT = 15.0
 RECONNECT_BACKOFF_START = 1.0
