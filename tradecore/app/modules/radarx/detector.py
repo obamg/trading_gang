@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings as app_settings
 from app.logging_config import log
 from app.models.radarx import RadarXAlert
-from app.services import redis_service
+from app.services import redis_service, thresholds
 
 CANDLE_STALE_SECONDS = 600
 _rest_client: httpx.AsyncClient | None = None
@@ -153,7 +153,18 @@ async def detect_symbol(
     ratio = current_vol / mean_vol
     rank_pct = sum(1 for v in baseline_vols if v <= current_vol) / len(baseline_vols) * 100
 
-    if z_score < z_threshold or ratio < ratio_threshold:
+    # Per-symbol rolling distribution: every closed-candle ratio gets recorded,
+    # and the dynamic threshold is the max of the global default and the
+    # symbol's own p95. This tightens thresholds on naturally chaotic alts
+    # without ever loosening them.
+    await thresholds.add_sample(symbol, "radarx_ratio", ratio)
+    await thresholds.add_sample(symbol, "radarx_zscore", z_score)
+    dyn_ratio = await thresholds.get_percentile(symbol, "radarx_ratio", 95.0, fallback=None)
+    dyn_z = await thresholds.get_percentile(symbol, "radarx_zscore", 95.0, fallback=None)
+    eff_ratio_threshold = max(ratio_threshold, dyn_ratio) if dyn_ratio is not None else ratio_threshold
+    eff_z_threshold = max(z_threshold, dyn_z) if dyn_z is not None else z_threshold
+
+    if z_score < eff_z_threshold or ratio < eff_ratio_threshold:
         return None
 
     price = _candle_close(current)
@@ -183,6 +194,8 @@ async def detect_symbol(
         "rank_pct": round(rank_pct, 1),
         "is_divergence": is_divergence,
         "divergence_score": div_score if is_divergence else None,
+        "z_threshold_effective": round(eff_z_threshold, 2),
+        "ratio_threshold_effective": round(eff_ratio_threshold, 2),
         "triggered_at": triggered_at.isoformat(),
         "tradingview_url": f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
     }

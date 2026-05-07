@@ -22,7 +22,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.flowpulse import FlowSignal
-from app.services import redis_service
+from app.services import redis_service, thresholds
 
 SMOOTHING_WINDOW = 2  # average last 2 snapshots = 2 minutes
 
@@ -227,10 +227,26 @@ async def _smooth_and_cache(db: AsyncSession, symbols: list[str], snapshot_at: d
         }
         await r.set(f"flow:{symbol}", json.dumps(cache), ex=REDIS_TTL)
 
-        # Alert on smoothed extremes only
+        # Per-symbol rolling-percentile thresholds: only tighten the global
+        # alert thresholds, never loosen them.
+        if avg_book is not None:
+            await thresholds.add_sample(symbol, "flow_book_imbalance", avg_book)
+        if avg_taker is not None:
+            await thresholds.add_sample(symbol, "flow_taker_ratio", avg_taker)
+
+        dyn_book_high = await thresholds.get_percentile(symbol, "flow_book_imbalance", 95.0, fallback=None)
+        dyn_book_low = await thresholds.get_percentile(symbol, "flow_book_imbalance", 5.0, fallback=None)
+        dyn_taker_high = await thresholds.get_percentile(symbol, "flow_taker_ratio", 95.0, fallback=None)
+        dyn_taker_low = await thresholds.get_percentile(symbol, "flow_taker_ratio", 5.0, fallback=None)
+
+        eff_book_high = max(BOOK_IMBALANCE_ALERT, dyn_book_high) if dyn_book_high else BOOK_IMBALANCE_ALERT
+        eff_book_low = min(1.0 / BOOK_IMBALANCE_ALERT, dyn_book_low) if dyn_book_low else 1.0 / BOOK_IMBALANCE_ALERT
+        eff_taker_high = max(TAKER_RATIO_ALERT, dyn_taker_high) if dyn_taker_high else TAKER_RATIO_ALERT
+        eff_taker_low = min(1.0 / TAKER_RATIO_ALERT, dyn_taker_low) if dyn_taker_low else 1.0 / TAKER_RATIO_ALERT
+
         is_extreme = (
-            (avg_book is not None and (avg_book >= BOOK_IMBALANCE_ALERT or avg_book <= 1.0 / BOOK_IMBALANCE_ALERT))
-            or (avg_taker is not None and (avg_taker >= TAKER_RATIO_ALERT or avg_taker <= 1.0 / TAKER_RATIO_ALERT))
+            (avg_book is not None and (avg_book >= eff_book_high or avg_book <= eff_book_low))
+            or (avg_taker is not None and (avg_taker >= eff_taker_high or avg_taker <= eff_taker_low))
             or (avg_top_long is not None and (avg_top_long >= TOP_RATIO_EXTREME or (100 - avg_top_long) >= TOP_RATIO_EXTREME))
         )
         if is_extreme:

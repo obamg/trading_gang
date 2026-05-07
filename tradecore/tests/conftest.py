@@ -40,6 +40,7 @@ class FakeRedis:
         self._keys: dict[str, str] = {}
         self._sets: dict[str, set[str]] = {}
         self._hashes: dict[str, dict[str, str]] = {}
+        self._zsets: dict[str, dict[str, float]] = {}
         self._published: list[tuple[str, str]] = []
 
     async def ping(self) -> bool:
@@ -97,6 +98,48 @@ class FakeRedis:
 
     async def expire(self, key: str, seconds: int):
         return True
+
+    # ---- sorted sets (used by thresholds + slow-OI + funding-fast) ----
+
+    async def zadd(self, key: str, mapping: dict):
+        zset = self._zsets.setdefault(key, {})
+        for member, score in mapping.items():
+            zset[member] = float(score)
+        return len(mapping)
+
+    async def zrange(self, key: str, start: int, stop: int, withscores: bool = False):
+        zset = self._zsets.get(key, {})
+        items = sorted(zset.items(), key=lambda kv: kv[1])
+        if stop == -1:
+            sliced = items[start:]
+        else:
+            sliced = items[start : stop + 1]
+        if withscores:
+            return [(m, s) for m, s in sliced]
+        return [m for m, _ in sliced]
+
+    async def zremrangebyrank(self, key: str, start: int, stop: int):
+        zset = self._zsets.get(key, {})
+        if not zset:
+            return 0
+        items = sorted(zset.items(), key=lambda kv: kv[1])
+        if stop == -1:
+            doomed = items[start:]
+        else:
+            doomed = items[start : stop + 1]
+        for m, _ in doomed:
+            zset.pop(m, None)
+        return len(doomed)
+
+    async def zremrangebyscore(self, key: str, lo: float, hi: float):
+        zset = self._zsets.get(key, {})
+        doomed = [m for m, s in zset.items() if lo <= s <= hi]
+        for m in doomed:
+            zset.pop(m, None)
+        return len(doomed)
+
+    async def zcard(self, key: str):
+        return len(self._zsets.get(key, {}))
 
     async def publish(self, channel: str, message: str):
         self._published.append((channel, message))

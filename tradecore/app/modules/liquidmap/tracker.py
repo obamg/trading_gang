@@ -88,6 +88,70 @@ async def ingest_event(db: AsyncSession, event: dict) -> dict | None:
     return None
 
 
+# ---------- estimated liq levels (predictive, from OI + leverage tiers) ----------
+
+# Heuristic split of OI across leverage tiers. Sums to 1.0 — half the OI is
+# attributed to longs, half to shorts at each tier. The tier mix is conservative
+# (most OI sits at lower leverage) so the resulting map errs toward closer-in
+# magnets rather than far-tail tails.
+LEVERAGE_TIERS: list[tuple[int, float]] = [
+    (10, 0.20),
+    (25, 0.40),
+    (50, 0.30),
+    (100, 0.10),
+]
+# Maintenance margin buffer — actual liquidation occurs slightly before the
+# theoretical 1/L move, so we shorten the offset.
+MAINT_BUFFER = 0.80
+
+
+async def compute_estimated_liq_levels(symbol: str, current_price: float) -> list[dict]:
+    """Project liq cluster levels from OI + assumed leverage distribution.
+
+    Unlike the realized heatmap (which only knows about liqs that *already*
+    happened), this estimates *where stops sit* — the actual magnet for price.
+    """
+    if current_price <= 0:
+        return []
+    oi = await redis_service.get_open_interest(symbol)
+    if not oi:
+        return []
+    oi_usd = float(oi.get("oi_usd", 0) or 0)
+    if oi_usd <= 0:
+        return []
+
+    levels: list[dict] = []
+    for tier, weight in LEVERAGE_TIERS:
+        offset_pct = MAINT_BUFFER / tier
+        side_size = oi_usd * weight * 0.5
+        levels.append({
+            "side": "long",
+            "price": current_price * (1 - offset_pct),
+            "size_usd": side_size,
+            "tier": tier,
+            "estimated": True,
+        })
+        levels.append({
+            "side": "short",
+            "price": current_price * (1 + offset_pct),
+            "size_usd": side_size,
+            "tier": tier,
+            "estimated": True,
+        })
+    return levels
+
+
+async def get_combined_levels(symbol: str, current_price: float, top_n: int = 30) -> list[dict]:
+    """Realized clusters merged with OI-projected estimated levels."""
+    realized = await get_heatmap(symbol, top_n=top_n)
+    for lv in realized:
+        lv.setdefault("estimated", False)
+    estimated = await compute_estimated_liq_levels(symbol, current_price)
+    combined = realized + estimated
+    combined.sort(key=lambda c: c["size_usd"], reverse=True)
+    return combined[:top_n]
+
+
 async def get_heatmap(symbol: str, top_n: int = 20) -> list[dict]:
     """Cluster buckets within 0.5% of each other and return top N concentration levels."""
     r = redis_service.get_redis()
@@ -279,4 +343,12 @@ async def run_poll_force_orders() -> None:
         log.error("liquidmap_poll_failed", err=str(e))
 
 
-__all__ = ["ingest_event", "get_heatmap", "listener", "LiquidationListener", "run_poll_force_orders"]
+__all__ = [
+    "ingest_event",
+    "get_heatmap",
+    "compute_estimated_liq_levels",
+    "get_combined_levels",
+    "listener",
+    "LiquidationListener",
+    "run_poll_force_orders",
+]

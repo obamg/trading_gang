@@ -21,20 +21,27 @@ from app.models.radarx import RadarXAlert
 from app.models.sentiment import SentimentSnapshot
 from app.models.whaleradar import OISurgeEvent, WhaleTrade
 from app.modules.flowpulse.detector import get_flow_signal
-from app.modules.liquidmap.tracker import get_heatmap
+from app.modules.liquidmap.tracker import compute_estimated_liq_levels, get_heatmap
 from app.modules.macropulse.gating import check_macro_gates
 from app.modules.macropulse.score import compute_macro_context
+from app.modules.sentimentpulse.collector import get_funding_fast
+from app.modules.whaleradar.detector import get_slow_oi_signal
 from app.services import redis_service
 
 DEFAULT_WEIGHTS = {
-    "macropulse": 20,
-    "whaleradar": 18,
-    "flowpulse": 15,
-    "radarx": 13,
-    "liquidmap": 13,
-    "sentimentpulse": 13,
+    "macropulse": 18,
+    "whaleradar": 16,
+    "flowpulse": 13,
+    "divergence": 12,       # leading-indicator-vs-price disagreement
+    "radarx": 11,
+    "liquidmap": 11,
+    "sentimentpulse": 11,
     "gemradar": 8,
 }
+
+# Liquidmap window — widened from ±2% to ±5% to catch larger magnet zones
+# that signal probable big moves before they trigger.
+LIQ_SWEEP_PCT = 0.05
 
 # Majors where GemRadar doesn't apply.
 MAJOR_SYMBOLS = {
@@ -148,34 +155,55 @@ async def _whaleradar_signal(db: AsyncSession, symbol: str) -> dict:
 
 
 async def _liquidmap_signal(symbol: str, current_price: float) -> dict:
-    levels = await get_heatmap(symbol, top_n=20)
-    if not levels or current_price <= 0:
+    if current_price <= 0:
         return {"direction": "neutral", "intensity": 0.0, "detail": None}
 
-    nearby_shorts = 0.0
-    nearby_longs = 0.0
-    total = 0.0
-    for lv in levels:
-        total += lv["size_usd"]
+    realized = await get_heatmap(symbol, top_n=40)
+    estimated = await compute_estimated_liq_levels(symbol, current_price)
+    if not realized and not estimated:
+        return {"direction": "neutral", "intensity": 0.0, "detail": None}
+
+    # Score each level by size × proximity. Closer & larger = stronger magnet.
+    short_pull = 0.0  # liq clusters above price → bullish magnet
+    long_pull = 0.0   # liq clusters below price → bearish magnet
+    total_weight = 0.0
+    for lv in (realized + estimated):
+        size = float(lv.get("size_usd", 0) or 0)
+        if size <= 0:
+            continue
         diff = (lv["price"] - current_price) / current_price
-        # short liquidations *above* price → bullish fuel
-        if lv["side"] == "short" and 0 < diff <= 0.02:
-            nearby_shorts += lv["size_usd"]
-        # long liquidations *below* price → bearish fuel
-        if lv["side"] == "long" and -0.02 <= diff < 0:
-            nearby_longs += lv["size_usd"]
+        if abs(diff) > LIQ_SWEEP_PCT:
+            continue
+        # Distance falloff: linear weight 1.0 at price → 0.0 at LIQ_SWEEP_PCT
+        proximity_w = max(0.0, 1.0 - abs(diff) / LIQ_SWEEP_PCT)
+        # De-weight estimated levels relative to realized (estimates are noisier)
+        kind_w = 0.6 if lv.get("estimated") else 1.0
+        weighted = size * proximity_w * kind_w
+        total_weight += weighted
+        if lv["side"] == "short" and diff > 0:
+            short_pull += weighted
+        elif lv["side"] == "long" and diff < 0:
+            long_pull += weighted
 
-    if total <= 0:
+    if total_weight <= 0:
         return {"direction": "neutral", "intensity": 0.0, "detail": None}
 
-    if nearby_shorts > nearby_longs:
+    if short_pull > long_pull:
         direction = "bullish"
-        intensity = _clip01(nearby_shorts / total)
-        detail = {"short_cluster_usd": round(nearby_shorts, 2)}
-    elif nearby_longs > nearby_shorts:
+        intensity = _clip01(short_pull / total_weight)
+        detail = {
+            "short_pull_usd": round(short_pull, 2),
+            "long_pull_usd": round(long_pull, 2),
+            "sweep_pct": LIQ_SWEEP_PCT,
+        }
+    elif long_pull > short_pull:
         direction = "bearish"
-        intensity = _clip01(nearby_longs / total)
-        detail = {"long_cluster_usd": round(nearby_longs, 2)}
+        intensity = _clip01(long_pull / total_weight)
+        detail = {
+            "long_pull_usd": round(long_pull, 2),
+            "short_pull_usd": round(short_pull, 2),
+            "sweep_pct": LIQ_SWEEP_PCT,
+        }
     else:
         direction = "neutral"
         intensity = 0.0
@@ -192,22 +220,48 @@ async def _sentiment_signal(db: AsyncSession, symbol: str) -> dict:
             .limit(1)
         )
     ).scalar_one_or_none()
-    if row is None:
+    fast = await get_funding_fast(symbol)
+
+    if row is None and fast is None:
         return {"direction": "neutral", "intensity": 0.0, "detail": None}
 
-    funding = float(row.funding_rate or 0)
-    long_ratio = float(row.long_ratio or 0)
+    funding = float(fast.get("funding_rate") if fast else (row.funding_rate or 0))
+    long_ratio = float(row.long_ratio or 0) if row is not None else 0.0
+    fz_24h = fast.get("funding_z_24h") if fast else None
+    fz_4h = fast.get("funding_z_4h") if fast else None
+    basis_pct = fast.get("basis_pct") if fast else None
 
     direction_score = 0
     intensity = 0.0
-    detail: dict = {"funding_rate": funding, "long_ratio": long_ratio}
+    detail: dict = {
+        "funding_rate": funding,
+        "long_ratio": long_ratio,
+        "funding_z_24h": fz_24h,
+        "funding_z_4h": fz_4h,
+        "basis_pct": basis_pct,
+    }
 
-    if funding > 0.0003:   # 0.03% → overheated longs = bearish
-        direction_score -= 1
-        intensity += _clip01(funding / 0.001)
-    elif funding < -0.0001:  # squeezable shorts = bullish
-        direction_score += 1
-        intensity += _clip01(abs(funding) / 0.001)
+    # Prefer rolling z-score over fixed thresholds when we have enough samples.
+    if fz_24h is not None:
+        # Funding z >= 2 with positive basis = overheated longs → bearish
+        if fz_24h >= 2.0:
+            direction_score -= 1
+            intensity += _clip01(fz_24h / 4.0)
+            if basis_pct is not None and basis_pct > 0.05:
+                intensity += 0.15
+        elif fz_24h <= -2.0:
+            direction_score += 1
+            intensity += _clip01(abs(fz_24h) / 4.0)
+            if basis_pct is not None and basis_pct < -0.05:
+                intensity += 0.15
+    else:
+        # Fallback to legacy static thresholds when fast cache hasn't populated yet
+        if funding > 0.0003:
+            direction_score -= 1
+            intensity += _clip01(funding / 0.001)
+        elif funding < -0.0001:
+            direction_score += 1
+            intensity += _clip01(abs(funding) / 0.001)
 
     if long_ratio and long_ratio >= 65:
         direction_score -= 1
@@ -256,6 +310,78 @@ async def _flowpulse_signal(symbol: str) -> dict:
             "taker_ratio": data.get("taker_ratio"),
             "top_long_ratio": data.get("top_long_ratio"),
         },
+    }
+
+
+async def _divergence_signal(db: AsyncSession, symbol: str) -> dict:
+    """Leading indicators contradict price.
+
+    Three setups, each adds intensity:
+      1. Volume coiling — radarx z-score high + price flat → coming breakout.
+      2. Slow OI buildup on flat price → directional accumulation.
+      3. Funding extreme z-score with confirming basis → reversal pressure.
+
+    Direction is set only when one of the directional setups (#2, #3) lights up.
+    Coiling alone bumps intensity but stays neutral (direction unknown).
+    """
+    direction_score = 0
+    intensity = 0.0
+    detail: dict = {}
+
+    since = datetime.now(timezone.utc) - timedelta(minutes=10)
+    rad = (
+        await db.execute(
+            select(RadarXAlert)
+            .where(RadarXAlert.symbol == symbol, RadarXAlert.triggered_at >= since)
+            .order_by(desc(RadarXAlert.triggered_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if rad is not None:
+        z = float(rad.z_score or 0)
+        pc = float(rad.price_change_pct or 0)
+        if z >= 2.5 and abs(pc) < 0.3:
+            intensity += 0.3
+            detail["volume_coiling"] = {"z": round(z, 2), "price_pct": pc}
+
+    slow = await get_slow_oi_signal(symbol)
+    if slow is not None:
+        z = float(slow.get("z_score") or 0)
+        pc = float(slow.get("price_change_pct") or 0)
+        if abs(z) >= 2.0 and abs(pc) < 1.5:
+            intensity += min(abs(z) / 4.0, 0.5)
+            if z > 0:
+                if pc > 0.2:
+                    direction_score += 1
+                elif pc < -0.2:
+                    direction_score -= 1
+            else:
+                # OI unwinding while price flat → likely the opposite of the prior bias
+                if pc > 0.2:
+                    direction_score -= 1
+                elif pc < -0.2:
+                    direction_score += 1
+            detail["oi_buildup"] = {"z": round(z, 2), "price_pct": pc, "kind": slow.get("direction")}
+
+    ff = await get_funding_fast(symbol)
+    if ff is not None:
+        fz = ff.get("funding_z_24h")
+        basis = ff.get("basis_pct")
+        if fz is not None:
+            if fz >= 2.0 and basis is not None and basis > 0.05:
+                direction_score -= 1
+                intensity += 0.3
+                detail["funding_overheat"] = {"z": fz, "basis_pct": basis}
+            elif fz <= -2.0 and basis is not None and basis < -0.05:
+                direction_score += 1
+                intensity += 0.3
+                detail["funding_squeeze"] = {"z": fz, "basis_pct": basis}
+
+    intensity = _clip01(intensity)
+    return {
+        "direction": _dir(direction_score),
+        "intensity": round(intensity, 3),
+        "detail": detail or None,
     }
 
 
@@ -362,6 +488,7 @@ async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None
     macro = await _macro_signal()
     gem = await _gemradar_signal(db, sym)
     flow = await _flowpulse_signal(sym)
+    diverg = await _divergence_signal(db, sym)
 
     modules = {
         "radarx": radarx,
@@ -371,6 +498,7 @@ async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None
         "sentimentpulse": sent,
         "macropulse": macro,
         "gemradar": gem,
+        "divergence": diverg,
     }
 
     # Normalize weights so they always sum to 100, preventing score compression

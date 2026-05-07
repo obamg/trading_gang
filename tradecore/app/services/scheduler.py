@@ -74,6 +74,14 @@ def start_scheduler() -> AsyncIOScheduler:
         max_instances=1,
     )
     sched.add_job(
+        whaleradar_detector.run_slow_oi_scan,
+        "interval",
+        minutes=15,
+        id="whale_slow_oi_scan",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
         whaleradar_detector.run_onchain_poll,
         "interval",
         seconds=60,
@@ -128,6 +136,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=60,
         id="sentiment_hourly",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        sentiment_collector.run_funding_fast,
+        "interval",
+        minutes=5,
+        id="sentiment_funding_fast",
         coalesce=True,
         max_instances=1,
     )
