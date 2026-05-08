@@ -191,3 +191,48 @@ async def test_fetch_fills_paginates_via_cursor(monkeypatch):
     assert fills[1].exchange_trade_id == "2"
     # Used the cursor — second call had cursor=PAGE2.
     assert any(p.get("cursor") == "PAGE2" for p in page_calls)
+
+
+@pytest.mark.asyncio
+async def test_signed_get_query_string_matches_signed_payload(monkeypatch):
+    """Regression: the URL we send must serialize params in the same order
+    we used to compute the signature. Bybit will reject with retCode=10004
+    "error sign" if the bytes differ.
+    """
+    import hashlib
+    import hmac
+    import urllib.parse
+
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/v5/execution/list" in request.url.path:
+            seen["raw_query"] = request.url.query.decode() if isinstance(request.url.query, bytes) else str(request.url.query)
+            seen["sign"] = request.headers.get("X-BAPI-SIGN")
+            seen["timestamp"] = request.headers.get("X-BAPI-TIMESTAMP")
+            seen["recv_window"] = request.headers.get("X-BAPI-RECV-WINDOW")
+            return httpx.Response(200, json={
+                "retCode": 0, "retMsg": "OK",
+                "result": {"list": [], "nextPageCursor": ""},
+            })
+        return httpx.Response(404)
+
+    adapter = BybitAdapter()
+    monkeypatch.setattr(
+        "app.services.exchanges.bybit.httpx.AsyncClient",
+        lambda **kw: _build_client(handler),
+    )
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    await adapter.fetch_fills(CREDS, since=since)
+
+    # The wire query string must be the exact byte sequence the signature was
+    # computed over. Recompute the HMAC the same way the adapter did and assert
+    # it matches the X-BAPI-SIGN header — this only holds when the URL we sent
+    # is byte-identical to the signed payload.
+    raw = f"{seen['timestamp']}{CREDS.api_key}{seen['recv_window']}{seen['raw_query']}"
+    expected = hmac.new(CREDS.api_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
+    assert seen["sign"] == expected
+    # And the wire query must be sorted (the property we're protecting).
+    pairs = urllib.parse.parse_qsl(seen["raw_query"])
+    keys = [k for k, _ in pairs]
+    assert keys == sorted(keys)

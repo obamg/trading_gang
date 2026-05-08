@@ -112,5 +112,9 @@ async def sync_now(
         raise AppError(404, "Credential not found", "NOT_FOUND")
     result = await sync_credential(db, user.id, cred_id)
     if not result.get("ok"):
-        raise AppError(502, result.get("reason", "sync_failed"), "SYNC_FAILED")
+        # Surface the underlying error message so the user sees the real cause
+        # (e.g. Bybit signature mismatch, Binance IP block) instead of a
+        # generic "fetch_failed".
+        detail = result.get("error") or result.get("reason") or "sync_failed"
+        raise AppError(502, detail[:500], "SYNC_FAILED")
     return result

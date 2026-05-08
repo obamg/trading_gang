@@ -57,12 +57,14 @@ async def _signed_get(
     client: httpx.AsyncClient, creds: Credentials, path: str, params: dict | None = None
 ) -> dict:
     params = params or {}
+    # Sign the same byte string we send. httpx serializes `params=` in dict
+    # insertion order, so we pre-encode (sorted) and append to the URL — the
+    # signed payload and the wire query string are guaranteed identical.
     query = urllib.parse.urlencode(sorted(params.items()))
-    resp = await client.get(
-        f"{BYBIT_REST}{path}",
-        params=params,
-        headers=_headers(creds, query),
-    )
+    url = f"{BYBIT_REST}{path}"
+    if query:
+        url = f"{url}?{query}"
+    resp = await client.get(url, headers=_headers(creds, query))
     if resp.status_code == 401 or resp.status_code == 403:
         raise BybitAuthError(f"bybit auth rejected: {resp.text}")
     if resp.status_code >= 400:
