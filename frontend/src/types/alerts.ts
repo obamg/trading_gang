@@ -6,7 +6,6 @@ export type ModuleKey =
   | "macropulse"
   | "gemradar"
   | "riskcalc"
-  | "tradelog"
   | "performancecore"
   | "oracle"
   | "flowpulse"

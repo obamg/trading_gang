@@ -16,7 +16,6 @@ import SentimentPage from "@/pages/dashboard/sentiment";
 import MacroPage from "@/pages/dashboard/macro";
 import GemRadarPage from "@/pages/dashboard/gemradar";
 import RiskCalcPage from "@/pages/dashboard/riskcalc";
-import TradeLogPage from "@/pages/dashboard/tradelog";
 import PerformancePage from "@/pages/dashboard/performance";
 import OraclePage from "@/pages/dashboard/oracle";
 import FlowPulsePage from "@/pages/dashboard/flowpulse";
@@ -110,7 +109,6 @@ export default function App() {
             <Route path="/macro" element={<MacroPage />} />
             <Route path="/gemradar" element={<GemRadarPage />} />
             <Route path="/riskcalc" element={<RiskCalcPage />} />
-            <Route path="/tradelog" element={<TradeLogPage />} />
             <Route path="/performance" element={<PerformancePage />} />
             <Route path="/oracle" element={<OraclePage />} />
             <Route path="/flowpulse" element={<FlowPulsePage />} />

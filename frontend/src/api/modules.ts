@@ -216,64 +216,6 @@ export const riskcalcApi = {
   history: (limit = 20) => http.get<Paginated<CalcHistoryRow>>("/riskcalc/history", { params: { limit } }).then((r) => r.data),
 };
 
-// ---------- TradeLog ----------
-export interface Trade {
-  id: string;
-  symbol: string;
-  asset_type: string;
-  side: string;
-  status: string;
-  is_paper: boolean;
-  entry_price: number;
-  entry_at: string;
-  exit_price: number | null;
-  exit_at: string | null;
-  size: number;
-  size_usd: number | null;
-  leverage: number;
-  stop_loss_price: number | null;
-  take_profit_price: number | null;
-  pnl_usd: number | null;
-  pnl_pct: number | null;
-  fees_usd: number | null;
-  net_pnl_usd: number | null;
-  r_multiple: number | null;
-  setup_name: string | null;
-  notes: string | null;
-  emotion: string | null;
-  followed_oracle: boolean;
-  oracle_signal_id: string | null;
-  exchange: string | null;
-  tags: string[];
-}
-export interface TradeCreate {
-  symbol: string;
-  side: string;
-  entry_price: number;
-  size: number;
-  asset_type?: string;
-  leverage?: number;
-  stop_loss_price?: number | null;
-  take_profit_price?: number | null;
-  is_paper?: boolean;
-  setup_name?: string | null;
-  notes?: string | null;
-  emotion?: string | null;
-  followed_oracle?: boolean;
-  oracle_signal_id?: string | null;
-  tags?: string[];
-}
-export const tradelogApi = {
-  list: (params?: { status?: string; symbol?: string; is_paper?: boolean; limit?: number; offset?: number }) =>
-    http.get<Paginated<Trade>>("/tradelog/trades", { params }).then((r) => r.data),
-  create: (body: TradeCreate) => http.post<Trade>("/tradelog/trades", body).then((r) => r.data),
-  patch: (id: string, body: Partial<{ exit_price: number; fees_usd: number; stop_loss_price: number; take_profit_price: number; notes: string; setup_name: string; emotion: string; tags_add: string[] }>) =>
-    http.patch<Trade>(`/tradelog/trades/${id}`, body).then((r) => r.data),
-  del: (id: string) => http.delete(`/tradelog/trades/${id}`).then((r) => r.data),
-  tags: () => http.get<Paginated<{ tag: string; count: number }>>("/tradelog/tags").then((r) => r.data),
-  setups: () => http.get<Paginated<{ setup: string; total_trades: number; net_pnl_usd: number; avg_r_multiple: number }>>("/tradelog/setups").then((r) => r.data),
-};
-
 // ---------- Performance ----------
 export interface PerfSnap {
   period: string;
