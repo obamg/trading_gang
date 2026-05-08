@@ -24,6 +24,7 @@ from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.services import redis_service
+from app.services.exchanges import sync as exchange_sync
 
 
 async def run_radarx_scan() -> None:
@@ -37,6 +38,20 @@ async def run_radarx_scan() -> None:
             except Exception as e:
                 log.error("radarx_scan_failed", symbol=symbol, err=str(e))
             await asyncio.sleep(0.05)
+
+
+async def run_exchange_sync_all() -> None:
+    """Pull fresh fills from every connected exchange and update Trade rows.
+
+    One credential failing does not abort the loop; the failure is recorded
+    on the credential row's `last_sync_error` field.
+    """
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await exchange_sync.sync_all_active_credentials(db)
+            log.info("exchange_sync_tick", **result)
+        except Exception as exc:
+            log.error("exchange_sync_tick_failed", err=str(exc))
 
 
 async def refresh_symbol_list() -> None:
@@ -193,6 +208,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=15,
         id="performance_refresh",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        run_exchange_sync_all,
+        "interval",
+        minutes=15,
+        id="exchange_sync_all",
         coalesce=True,
         max_instances=1,
     )

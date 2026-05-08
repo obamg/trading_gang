@@ -169,10 +169,10 @@ async def setups(user: CurrentUser, db: DBSession):
 
 @router.post("/sync")
 async def sync(_user: CurrentUser):
-    # Binance API key encryption + live fetch is a Team 8 concern —
-    # we expose the endpoint so the frontend can wire it, but it's a stub.
+    # Replaced by /exchanges/credentials/{id}/sync — kept here for older
+    # clients so they get a clear pointer to the new endpoint.
     raise AppError(
-        501,
-        "Exchange sync requires connected API keys (not yet configured)",
-        "SYNC_NOT_CONFIGURED",
+        410,
+        "Use POST /exchanges/credentials/{id}/sync after connecting an API key",
+        "SYNC_MOVED",
     )

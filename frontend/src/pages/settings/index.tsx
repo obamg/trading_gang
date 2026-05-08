@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
+import ConnectedExchanges from "@/components/ConnectedExchanges";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { requestNotificationPermission } from "@/hooks/useNotifications";
 import {
@@ -162,6 +163,9 @@ export default function SettingsPage() {
           </p>
         </CardBody>
       </Card>
+
+      {/* Connected Exchanges (drives performance metrics) */}
+      <ConnectedExchanges />
 
       {/* Telegram */}
       <Card>
