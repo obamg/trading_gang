@@ -65,6 +65,10 @@ async def compute_user_performance(
             Trade.exit_at.isnot(None),
             Trade.exit_at >= period_start,
             Trade.exit_at <= period_end,
+            # Exclude external-entry placeholders (positions opened before the
+            # user's API key was connected — pnl is unknowable, so they'd
+            # otherwise count as fake breakevens).
+            Trade.exit_reason.is_distinct_from("external_entry"),
         )
         .order_by(Trade.exit_at)
     )

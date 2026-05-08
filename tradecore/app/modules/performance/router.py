@@ -92,6 +92,7 @@ async def equity_curve(
                 Trade.status == "closed",
                 Trade.is_paper.is_(is_paper),
                 Trade.exit_at >= since,
+                Trade.exit_reason.is_distinct_from("external_entry"),
             )
             .order_by(Trade.exit_at)
         )
@@ -119,6 +120,7 @@ async def by_setup(user: CurrentUser, db: DBSession):
             Trade.user_id == user.id,
             Trade.status == "closed",
             Trade.setup_name.isnot(None),
+            Trade.exit_reason.is_distinct_from("external_entry"),
         )
         .group_by(Trade.setup_name)
     )
@@ -145,7 +147,11 @@ async def by_symbol(user: CurrentUser, db: DBSession, limit: int = Query(default
             func.count(Trade.id),
             func.sum(func.coalesce(Trade.net_pnl_usd, 0)),
         )
-        .where(Trade.user_id == user.id, Trade.status == "closed")
+        .where(
+            Trade.user_id == user.id,
+            Trade.status == "closed",
+            Trade.exit_reason.is_distinct_from("external_entry"),
+        )
         .group_by(Trade.symbol)
         .order_by(desc(func.sum(func.coalesce(Trade.net_pnl_usd, 0))))
         .limit(limit)
@@ -168,7 +174,11 @@ async def by_time(user: CurrentUser, db: DBSession):
             func.count(Trade.id),
             func.sum(func.coalesce(Trade.net_pnl_usd, 0)),
         )
-        .where(Trade.user_id == user.id, Trade.status == "closed")
+        .where(
+            Trade.user_id == user.id,
+            Trade.status == "closed",
+            Trade.exit_reason.is_distinct_from("external_entry"),
+        )
         .group_by("h")
         .order_by("h")
     )
@@ -183,7 +193,11 @@ async def by_time(user: CurrentUser, db: DBSession):
             func.count(Trade.id),
             func.sum(func.coalesce(Trade.net_pnl_usd, 0)),
         )
-        .where(Trade.user_id == user.id, Trade.status == "closed")
+        .where(
+            Trade.user_id == user.id,
+            Trade.status == "closed",
+            Trade.exit_reason.is_distinct_from("external_entry"),
+        )
         .group_by("d")
         .order_by("d")
     )
