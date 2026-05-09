@@ -17,3 +17,4 @@ from app.models.delivery import UserAlertDelivery, AlertCooldown  # noqa: F401
 from app.models.news import NewsArticle  # noqa: F401
 from app.models.whale_entity import WhaleEntity, WhaleEntityAddress  # noqa: F401
 from app.models.exchange import ExchangeCredential  # noqa: F401
+from app.models.walletwatch import WalletSwap  # noqa: F401

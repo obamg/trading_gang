@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     coingecko_api_key: str = ""
     trading_economics_api_key: str = ""
 
+    # WalletWatch — DEX swap tracking for labeled smart-money wallets.
+    walletwatch_enabled: bool = False
+    walletwatch_min_usd: float = 25_000.0
+    alchemy_api_key: str = ""
+    helius_api_key: str = ""
+    # One Etherscan V2 key covers BSC, Arbitrum, Base, Polygon, Optimism, etc.
+    # via the chainid parameter — no per-explorer signup needed.
+    etherscan_api_key: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"

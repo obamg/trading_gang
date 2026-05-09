@@ -22,6 +22,7 @@ from app.modules.flowpulse import detector as flowpulse_detector
 from app.modules.newspulse import collector as newspulse_collector
 from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.positionmonitor import monitor as positionmonitor
+from app.modules.walletwatch import detector as walletwatch_detector
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.services import redis_service
 from app.services.exchanges import sync as exchange_sync
@@ -216,6 +217,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=15,
         id="exchange_sync_all",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        walletwatch_detector.run_walletwatch_scan,
+        "interval",
+        seconds=60,
+        id="walletwatch_scan",
         coalesce=True,
         max_instances=1,
     )
