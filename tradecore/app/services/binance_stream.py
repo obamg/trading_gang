@@ -94,6 +94,14 @@ class BinanceStreamManager:
             if s.get("contractType") != "PERPETUAL":
                 continue
             sym = s["symbol"]
+            # Skip non-ASCII or non-alphanumeric symbols. Binance occasionally
+            # lists exotic perps like ``币安人生USDT`` whose UTF-8 bytes get
+            # URL-encoded into the combined-streams subscription URL — Binance
+            # then accepts the WS connection but never sends data ("zombie
+            # connection"), starving every other stream on the same socket.
+            if not sym.isascii() or not sym.isalnum():
+                log.warning("binance_skip_unusual_symbol", symbol=sym)
+                continue
             t = tickers.get(sym)
             if not t:
                 continue
