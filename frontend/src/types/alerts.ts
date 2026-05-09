@@ -9,7 +9,8 @@ export type ModuleKey =
   | "performancecore"
   | "oracle"
   | "flowpulse"
-  | "newspulse";
+  | "newspulse"
+  | "walletwatch";
 
 export interface AlertEvent {
   type: string;

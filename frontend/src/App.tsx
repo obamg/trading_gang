@@ -20,6 +20,7 @@ import PerformancePage from "@/pages/dashboard/performance";
 import OraclePage from "@/pages/dashboard/oracle";
 import FlowPulsePage from "@/pages/dashboard/flowpulse";
 import NewsPulsePage from "@/pages/dashboard/newspulse";
+import WalletWatchPage from "@/pages/dashboard/walletwatch";
 import SettingsPage from "@/pages/settings";
 import LandingPage from "@/pages/landing";
 import { useAuthStore } from "@/stores/authStore";
@@ -113,6 +114,7 @@ export default function App() {
             <Route path="/oracle" element={<OraclePage />} />
             <Route path="/flowpulse" element={<FlowPulsePage />} />
             <Route path="/newspulse" element={<NewsPulsePage />} />
+            <Route path="/walletwatch" element={<WalletWatchPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
 

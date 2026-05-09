@@ -323,6 +323,89 @@ export const flowApi = {
     http.get<{ snapshots_24h: number; bullish_24h: number; bearish_24h: number; avg_book_imbalance: number | null; avg_taker_ratio: number | null }>("/flowpulse/stats").then((r) => r.data),
 };
 
+// ---------- WalletWatch (discovery leaderboard) ----------
+export interface DiscoveryRow {
+  wallet_address: string;
+  chain: string;
+  total_realized_usd: number;
+  total_unrealized_usd: number;
+  total_cost_basis_usd: number;
+  win_count: number;
+  loss_count: number;
+  win_rate: number;
+  avg_multiple: number;
+  best_multiple: number;
+  token_count: number;
+  discovery_score: number;
+  promoted_at: string | null;
+  last_scored_at: string;
+}
+export interface DiscoveryWalletDetail {
+  wallet_address: string;
+  score: {
+    discovery_score: number;
+    total_realized_usd: number;
+    total_unrealized_usd: number;
+    win_count: number;
+    loss_count: number;
+    win_rate: number;
+    best_multiple: number;
+    token_count: number;
+    promoted_at: string | null;
+  } | null;
+  tokens: Array<{
+    chain: string;
+    token_address: string;
+    token_symbol: string | null;
+    total_buy_usd: number;
+    total_sell_usd: number;
+    current_value_usd: number;
+    realized_pnl_usd: number;
+    unrealized_pnl_usd: number;
+    multiple: number | null;
+    first_buy_at: string | null;
+  }>;
+}
+export interface DiscoveryToken {
+  chain: string;
+  address: string;
+  symbol: string | null;
+  name: string | null;
+  source: string;
+  discovered_at: string;
+  last_scored_at: string | null;
+}
+export const walletwatchApi = {
+  leaderboard: (params?: {
+    chain?: string;
+    min_realized?: number;
+    min_win_rate?: number;
+    min_token_count?: number;
+    only_unpromoted?: boolean;
+    limit?: number;
+    offset?: number;
+  }) =>
+    http
+      .get<Paginated<DiscoveryRow>>("/walletwatch/discovery/leaderboard", { params })
+      .then((r) => r.data),
+  walletDetail: (address: string) =>
+    http
+      .get<DiscoveryWalletDetail>(`/walletwatch/discovery/wallet/${address}`)
+      .then((r) => r.data),
+  tokens: (params?: { chain?: string; limit?: number }) =>
+    http
+      .get<Paginated<DiscoveryToken>>("/walletwatch/discovery/tokens", { params })
+      .then((r) => r.data),
+  promote: (address: string, name: string, entity_type = "smart_money") =>
+    http
+      .post<{ ok: boolean; entity_id?: string; reason?: string }>(
+        `/walletwatch/discovery/promote/${address}`,
+        null,
+        { params: { name, entity_type } },
+      )
+      .then((r) => r.data),
+};
+
 // ---------- NewsPulse ----------
 export interface NewsArticle {
   id: string;
