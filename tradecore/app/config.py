@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     binance_api_secret: str = ""
     binance_streams_enabled: bool = False  # opt-in via env for local dev
 
+    # Market data source switch — pick the WS provider used for kline/trade/
+    # bookticker/liquidation feeds. Some hosting regions are geo-blocked by
+    # Binance's WS edge (TCP accepts, no data sent). Bybit is unrestricted in
+    # most regions and serves the same USDT-perp universe.
+    # Values: "bybit" | "binance" | "none"
+    market_data_source: str = "bybit"
+    bybit_base_url: str = "wss://stream.bybit.com/v5/public/linear"
+    bybit_rest_url: str = "https://api.bybit.com"
+
     # Telegram
     telegram_bot_token: str = ""
     telegram_bot_enabled: bool = False

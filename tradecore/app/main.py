@@ -45,6 +45,7 @@ from app.modules.exchanges.router import router as exchanges_router
 from app.modules.walletwatch.router import router as walletwatch_router
 from app.services import redis_service
 from app.services.binance_stream import manager as binance_manager
+from app.services.bybit_stream import manager as bybit_manager
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.telegram_service import service as telegram_service
 from app.services.ws_manager import manager as ws_manager
@@ -105,19 +106,34 @@ async def _run_leader_loop(r, stop_event: asyncio.Event) -> None:
     token = secrets.token_hex(8)
     owns = False
 
+    # Pick the market-data manager once per leader acquisition. Switching
+    # ``MARKET_DATA_SOURCE`` requires a restart, which is fine — it's a
+    # deploy-time config, not a runtime knob.
+    source = (settings.market_data_source or "").lower()
+    if source == "bybit":
+        market_manager = bybit_manager
+    elif source == "binance" and settings.binance_streams_enabled:
+        market_manager = binance_manager
+    else:
+        market_manager = None
+
     async def _start_singletons() -> None:
-        await binance_manager.start()
+        if market_manager is not None:
+            await market_manager.start()
+        else:
+            log.info("market_data_source_disabled", source=source)
         await telegram_service.start()
         await liquidation_listener.start()
         await oracle_trigger.start()
-        log.info("worker_became_leader", token=token)
+        log.info("worker_became_leader", token=token, market_source=source)
 
     async def _stop_singletons() -> None:
         try:
             await oracle_trigger.stop()
             await liquidation_listener.stop()
             await telegram_service.stop()
-            await binance_manager.stop()
+            if market_manager is not None:
+                await market_manager.stop()
         except Exception as e:
             log.error("singleton_stop_error", err=str(e))
 
@@ -262,13 +278,15 @@ async def health():
     except Exception as exc:
         redis_status = f"fail: {type(exc).__name__}"
 
-    # Binance stream liveness — fail if last BTCUSDT candle is older than 10min
+    # Market data stream liveness — same Redis schema regardless of source.
+    # Fail if last BTCUSDT candle is older than 10min.
     stream_status = "ok"
     try:
         r = redis_service.get_redis()
         raw = await r.lindex("candles:BTCUSDT", 0)
         if raw is None:
-            stream_status = "no_data" if settings.binance_streams_enabled else "disabled"
+            source = (settings.market_data_source or "").lower()
+            stream_status = "no_data" if source in ("bybit", "binance") else "disabled"
         else:
             import json as _json
             candle = _json.loads(raw)
@@ -294,7 +312,8 @@ async def health():
         "status": overall,
         "db": db_status,
         "redis": redis_status,
-        "binance_stream": stream_status,
+        "binance_stream": stream_status,  # historical key name; covers active source
+        "market_data_source": settings.market_data_source,
         "env": settings.app_env,
     }
 
