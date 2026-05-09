@@ -6,6 +6,11 @@ from sqlalchemy import desc, func, select
 
 from app.dependencies import CurrentUser, DBSession
 from app.models.walletwatch import WalletSwap
+from app.models.walletwatch_discovery import (
+    DiscoveryToken,
+    WalletPnlScore,
+    WalletTokenPnl,
+)
 from app.models.whale_entity import WhaleEntity
 
 router = APIRouter(prefix="/walletwatch", tags=["walletwatch"])
@@ -114,6 +119,204 @@ async def top_tokens(
             for r in rows
         ],
         "since": since.isoformat(),
+    }
+
+
+@router.get("/discovery/leaderboard")
+async def discovery_leaderboard(
+    _user: CurrentUser,
+    db: DBSession,
+    chain: str | None = Query(default=None),
+    min_realized: float = Query(default=0, ge=0),
+    min_win_rate: float = Query(default=0, ge=0, le=1),
+    min_token_count: int = Query(default=1, ge=1),
+    only_unpromoted: bool = Query(default=True),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """Top candidate wallets by discovery_score, filterable.
+
+    The default ``only_unpromoted=True`` shows wallets we haven't already
+    pulled into ``whale_entities`` so this surfaces *new* findings.
+    """
+    stmt = select(WalletPnlScore).order_by(desc(WalletPnlScore.discovery_score))
+    if chain:
+        stmt = stmt.where(WalletPnlScore.chain == chain.lower())
+    if min_realized > 0:
+        stmt = stmt.where(WalletPnlScore.total_realized_usd >= min_realized)
+    if min_win_rate > 0:
+        stmt = stmt.where(WalletPnlScore.win_rate >= min_win_rate)
+    if min_token_count > 1:
+        stmt = stmt.where(WalletPnlScore.token_count >= min_token_count)
+    if only_unpromoted:
+        stmt = stmt.where(WalletPnlScore.promoted_at.is_(None))
+    stmt = stmt.limit(limit).offset(offset)
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "items": [
+            {
+                "wallet_address": r.wallet_address,
+                "chain": r.chain,
+                "total_realized_usd": float(r.total_realized_usd),
+                "total_unrealized_usd": float(r.total_unrealized_usd),
+                "total_cost_basis_usd": float(r.total_cost_basis_usd),
+                "win_count": r.win_count,
+                "loss_count": r.loss_count,
+                "win_rate": float(r.win_rate),
+                "avg_multiple": float(r.avg_multiple),
+                "best_multiple": float(r.best_multiple),
+                "token_count": r.token_count,
+                "discovery_score": float(r.discovery_score),
+                "promoted_at": r.promoted_at.isoformat() if r.promoted_at else None,
+                "last_scored_at": r.last_scored_at.isoformat(),
+            }
+            for r in rows
+        ],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/discovery/wallet/{wallet_address}")
+async def discovery_wallet_detail(
+    _user: CurrentUser,
+    db: DBSession,
+    wallet_address: str,
+):
+    """Per-token PnL breakdown for one wallet — sanity-check a leaderboard row."""
+    addr = wallet_address.lower() if wallet_address.startswith("0x") else wallet_address
+    score = (
+        await db.execute(
+            select(WalletPnlScore).where(WalletPnlScore.wallet_address == addr)
+        )
+    ).scalar_one_or_none()
+    rows = (
+        await db.execute(
+            select(WalletTokenPnl)
+            .where(WalletTokenPnl.wallet_address == addr)
+            .order_by(desc(WalletTokenPnl.realized_pnl_usd + WalletTokenPnl.unrealized_pnl_usd))
+        )
+    ).scalars().all()
+    return {
+        "wallet_address": addr,
+        "score": (
+            {
+                "discovery_score": float(score.discovery_score),
+                "total_realized_usd": float(score.total_realized_usd),
+                "total_unrealized_usd": float(score.total_unrealized_usd),
+                "win_count": score.win_count,
+                "loss_count": score.loss_count,
+                "win_rate": float(score.win_rate),
+                "best_multiple": float(score.best_multiple),
+                "token_count": score.token_count,
+                "promoted_at": score.promoted_at.isoformat() if score.promoted_at else None,
+            }
+            if score
+            else None
+        ),
+        "tokens": [
+            {
+                "chain": r.chain,
+                "token_address": r.token_address,
+                "token_symbol": r.token_symbol,
+                "total_buy_usd": float(r.total_buy_usd),
+                "total_sell_usd": float(r.total_sell_usd),
+                "current_value_usd": float(r.current_value_usd),
+                "realized_pnl_usd": float(r.realized_pnl_usd),
+                "unrealized_pnl_usd": float(r.unrealized_pnl_usd),
+                "multiple": float(r.multiple) if r.multiple is not None else None,
+                "first_buy_at": r.first_buy_at.isoformat() if r.first_buy_at else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/discovery/tokens")
+async def discovery_tokens(
+    _user: CurrentUser,
+    db: DBSession,
+    chain: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Tokens currently being scored (debugging visibility)."""
+    stmt = select(DiscoveryToken).order_by(desc(DiscoveryToken.discovered_at))
+    if chain:
+        stmt = stmt.where(DiscoveryToken.chain == chain.lower())
+    stmt = stmt.limit(limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "items": [
+            {
+                "chain": r.chain,
+                "address": r.address,
+                "symbol": r.symbol,
+                "name": r.name,
+                "source": r.source,
+                "discovered_at": r.discovered_at.isoformat(),
+                "last_scored_at": r.last_scored_at.isoformat() if r.last_scored_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/discovery/promote/{wallet_address}")
+async def discovery_promote(
+    _user: CurrentUser,
+    db: DBSession,
+    wallet_address: str,
+    name: str = Query(..., min_length=1, max_length=100),
+    entity_type: str = Query(default="smart_money"),
+):
+    """Promote a discovered wallet into whale_entities (manual review gate).
+
+    Idempotent — re-promoting an already-promoted wallet is a no-op.
+    """
+    from app.models.whale_entity import WhaleEntity, WhaleEntityAddress
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    addr = wallet_address.lower() if wallet_address.startswith("0x") else wallet_address
+    score = (
+        await db.execute(select(WalletPnlScore).where(WalletPnlScore.wallet_address == addr))
+    ).scalar_one_or_none()
+    if score is None:
+        return {"ok": False, "reason": "wallet_not_in_discovery"}
+    if score.promoted_at is not None:
+        return {"ok": True, "reason": "already_promoted", "entity_id": str(score.promoted_entity_id)}
+
+    entity = (
+        await db.execute(select(WhaleEntity).where(WhaleEntity.name == name))
+    ).scalar_one_or_none()
+    if entity is None:
+        from decimal import Decimal as _D
+
+        # Map win_rate × normalized score into a 0..1 conviction estimate.
+        conviction = min(float(score.win_rate) * (1 + min(score.token_count, 10) / 10.0), 1.0)
+        entity = WhaleEntity(
+            name=name,
+            entity_type=entity_type,
+            conviction_score=_D(str(round(conviction, 3))),
+        )
+        db.add(entity)
+        await db.flush()
+
+    db.add(
+        WhaleEntityAddress(
+            entity_id=entity.id,
+            address=addr,
+            chain=score.chain,
+            label="auto-promoted",
+        )
+    )
+    score.promoted_at = datetime.now(timezone.utc)
+    score.promoted_entity_id = entity.id
+    await db.commit()
+    return {
+        "ok": True,
+        "entity_id": str(entity.id),
+        "wallet_address": addr,
+        "promoted_at": score.promoted_at.isoformat(),
     }
 
 

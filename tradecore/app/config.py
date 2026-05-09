@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     # via the chainid parameter — no per-explorer signup needed.
     etherscan_api_key: str = ""
 
+    # WalletWatch discovery (Layer 2) — PnL-based wallet scoring + leaderboard.
+    discovery_enabled: bool = False
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"

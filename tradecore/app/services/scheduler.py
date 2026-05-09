@@ -23,6 +23,7 @@ from app.modules.newspulse import collector as newspulse_collector
 from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.walletwatch import detector as walletwatch_detector
+from app.modules.walletwatch.discovery import engine as discovery_engine
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.services import redis_service
 from app.services.exchanges import sync as exchange_sync
@@ -225,6 +226,22 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         seconds=60,
         id="walletwatch_scan",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        discovery_engine.refresh_candidates_job,
+        "interval",
+        hours=6,
+        id="discovery_refresh_candidates",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        discovery_engine.score_candidates_job,
+        "interval",
+        hours=1,
+        id="discovery_score_candidates",
         coalesce=True,
         max_instances=1,
     )

@@ -25,6 +25,8 @@ from app.services import redis_service
 CG_PLATFORM = {
     "ethereum": "ethereum",
     "bsc": "binance-smart-chain",
+    "arbitrum": "arbitrum-one",
+    "base": "base",
     "solana": "solana",
 }
 CG_BASE = "https://api.coingecko.com/api/v3"
