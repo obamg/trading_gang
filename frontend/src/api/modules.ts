@@ -291,7 +291,34 @@ export const oracleApi = {
   generate: (symbol: string, persist = true) => http.post<OracleSignal>("/oracle/generate", { symbol, persist }).then((r) => r.data),
   performance: () => http.get<{ total_signals: number; measured_1h: number; measured_4h: number; accuracy_1h_pct: number | null; accuracy_4h_pct: number | null }>("/oracle/performance").then((r) => r.data),
   updateSettings: (body: Record<string, unknown>) => http.post("/oracle/settings", body).then((r) => r.data),
+  board: (params?: { direction?: "bullish" | "bearish"; min_modules?: number; min_score?: number }) =>
+    http.get<OracleBoardResponse>("/oracle/board", { params }).then((r) => r.data),
 };
+export interface OracleBoardModule {
+  name: string;
+  direction: string;
+  intensity: number;
+  weight?: number;
+  contribution?: number;
+}
+export interface OracleBoardRow {
+  symbol: string;
+  score: number;
+  recommendation: string;
+  confidence: string;
+  confluence_count: number;
+  agreeing_count: number;
+  current_price: number | null;
+  modules: OracleBoardModule[];
+}
+export interface OracleBoardResponse {
+  bullish: OracleBoardRow[];
+  bearish: OracleBoardRow[];
+  updated_at: string | null;
+  stale: boolean;
+  min_modules: number;
+  universe_size?: number;
+}
 
 // ---------- FlowPulse ----------
 export interface FlowSignalRow {

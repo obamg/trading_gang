@@ -8,9 +8,17 @@ import { Badge } from "@/components/ui/Badge";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { Tabs } from "@/components/ui/Tabs";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
 import { LastUpdated } from "@/components/ui/LastUpdated";
-import { oracleApi, type LiveOracle, type OracleSignal } from "@/api/modules";
+import {
+  oracleApi,
+  type LiveOracle,
+  type OracleBoardRow,
+  type OracleSignal,
+} from "@/api/modules";
+
+type TabKey = "symbol" | "board";
 
 const RECOMMENDATION_META: Record<string, { color: string; label: string }> = {
   strong_long: { color: "text-profit", label: "STRONG LONG" },
@@ -23,6 +31,37 @@ const RECOMMENDATION_META: Record<string, { color: string; label: string }> = {
 };
 
 export default function OraclePage() {
+  const [tab, setTab] = useState<TabKey>("symbol");
+
+  return (
+    <div className="flex flex-col gap-4 md:gap-6">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold md:text-2xl">Oracle — Meta-signal aggregator</h1>
+          <p className="text-sm text-textSecondary">
+            Per-symbol confluence + a cross-market leaderboard of coins where multiple modules agree.
+          </p>
+        </div>
+        <LiveIndicator />
+      </header>
+
+      <Tabs
+        tabs={[
+          { key: "symbol", label: "Per-Symbol Analysis" },
+          { key: "board", label: "Confluence Board" },
+        ]}
+        active={tab}
+        onChange={(k) => setTab(k as TabKey)}
+      />
+
+      {tab === "symbol" ? <PerSymbolView /> : <ConfluenceBoardView />}
+    </div>
+  );
+}
+
+// ---------- per-symbol view (existing behavior, unchanged) ----------
+
+function PerSymbolView() {
   const nav = useNavigate();
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [pending, setPending] = useState(symbol);
@@ -49,16 +88,9 @@ export default function OraclePage() {
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold md:text-2xl">Oracle — Meta-signal aggregator</h1>
-          <p className="text-sm text-textSecondary">6-module confluence with direction, confidence, and trade plan.</p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <LiveIndicator />
-          <LastUpdated date={lastUpdated} label="Last signal" />
-        </div>
-      </header>
+      <div className="flex items-center justify-end">
+        <LastUpdated date={lastUpdated} label="Last signal" />
+      </div>
 
       <form
         className="flex items-end gap-2"
@@ -105,6 +137,168 @@ export default function OraclePage() {
           )}
         </CardBody>
       </Card>
+    </div>
+  );
+}
+
+// ---------- confluence board view ----------
+
+function ConfluenceBoardView() {
+  const [minModules, setMinModules] = useState(3);
+  const [minScore, setMinScore] = useState(0);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["oracle", "board", { minModules, minScore }],
+    queryFn: () => oracleApi.board({ min_modules: minModules, min_score: minScore }),
+    refetchInterval: 60_000,
+  });
+
+  const updated = data?.updated_at ? new Date(data.updated_at) : null;
+
+  return (
+    <div className="flex flex-col gap-4 md:gap-6">
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between w-full">
+            <div className="flex items-end gap-3">
+              <NumericFilter
+                label="Min modules agreeing"
+                value={minModules}
+                onChange={setMinModules}
+                min={2}
+                max={8}
+                step={1}
+              />
+              <NumericFilter
+                label="Min |score|"
+                value={minScore}
+                onChange={setMinScore}
+                min={0}
+                max={100}
+                step={5}
+              />
+            </div>
+            <LastUpdated date={updated} label="Snapshot" />
+          </div>
+        </CardHeader>
+        <CardBody>
+          {data?.stale ? (
+            <p className="text-sm text-textSecondary">
+              No snapshot yet — the scheduler refreshes every 3 min. Check back shortly.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <BoardColumn
+                title="Bullish confluence"
+                tone="bullish"
+                rows={data?.bullish ?? []}
+                loading={isLoading}
+              />
+              <BoardColumn
+                title="Bearish confluence"
+                tone="bearish"
+                rows={data?.bearish ?? []}
+                loading={isLoading}
+              />
+            </div>
+          )}
+          <p className="mt-3 text-xs text-textMuted">
+            Universe: top {data?.universe_size ?? 50} perps by 24h volume. A symbol qualifies when ≥{data?.min_modules ?? 3}{" "}
+            modules signal the same direction with intensity {">"} 0.3.
+          </p>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+function BoardColumn({
+  title, tone, rows, loading,
+}: {
+  title: string;
+  tone: "bullish" | "bearish";
+  rows: OracleBoardRow[];
+  loading: boolean;
+}) {
+  if (loading) return <Skeleton className="h-48" />;
+  if (rows.length === 0) {
+    return (
+      <div>
+        <h3 className={`mb-2 text-sm font-semibold ${tone === "bullish" ? "text-profit" : "text-loss"}`}>
+          {title}
+        </h3>
+        <p className="text-sm text-textSecondary">Nothing crossing the bar.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className={`text-sm font-semibold ${tone === "bullish" ? "text-profit" : "text-loss"}`}>
+        {title} <span className="ml-1 font-normal text-textMuted">({rows.length})</span>
+      </h3>
+      {rows.map((r) => <BoardRow key={r.symbol} row={r} tone={tone} />)}
+    </div>
+  );
+}
+
+function BoardRow({ row, tone }: { row: OracleBoardRow; tone: "bullish" | "bearish" }) {
+  const scoreColor = tone === "bullish" ? "text-profit" : "text-loss";
+  return (
+    <div className="rounded-md border border-borderSubtle bg-bgElevated px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold tabular-nums">{row.symbol}</span>
+          <Badge variant="neutral" className="text-[10px]">
+            {row.agreeing_count}/{row.confluence_count} modules
+          </Badge>
+          <Badge variant={row.confidence === "high" ? "bullish" : row.confidence === "medium" ? "warning" : "neutral"} className="text-[10px]">
+            {row.confidence}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-sm font-bold tabular-nums ${scoreColor}`}>
+            {row.score > 0 ? "+" : ""}{row.score}
+          </span>
+          {row.current_price ? (
+            <span className="text-xs text-textMuted">
+              <NumberDisplay value={row.current_price} decimals={4} prefix="$" />
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {row.modules.map((m) => (
+          <span
+            key={m.name}
+            className="rounded bg-bgSecondary px-2 py-0.5 text-[10px] capitalize text-textSecondary"
+          >
+            {m.name}
+            <span className="ml-1 text-textMuted">{m.intensity.toFixed(2)}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NumericFilter({
+  label, value, onChange, min, max, step,
+}: { label: string; value: number; onChange: (v: number) => void; min: number; max: number; step: number }) {
+  return (
+    <div className="w-32">
+      <label className="mb-1.5 block text-xs font-medium text-textSecondary">{label}</label>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => {
+          const n = parseFloat(e.target.value);
+          onChange(Number.isFinite(n) ? n : 0);
+        }}
+        className="w-full rounded-md border border-borderDefault bg-bgSecondary px-3 h-10 text-sm focus:border-borderStrong focus:outline-none"
+      />
     </div>
   );
 }

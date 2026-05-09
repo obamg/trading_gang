@@ -14,6 +14,7 @@ from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.modules.gemradar import detector as gemradar_detector
 from app.modules.macropulse import collector as macropulse_collector
+from app.modules.oracle import board as oracle_board
 from app.modules.oracle import engine as oracle_engine
 from app.modules.performance import aggregator as performance_aggregator
 from app.modules.radarx import detector as radarx_detector
@@ -242,6 +243,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         hours=1,
         id="discovery_score_candidates",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        oracle_board.run_board_job,
+        "interval",
+        minutes=3,
+        id="oracle_board_refresh",
         coalesce=True,
         max_instances=1,
     )

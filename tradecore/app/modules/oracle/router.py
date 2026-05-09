@@ -9,6 +9,7 @@ from app.dependencies import CurrentUser, DBSession
 from app.errors import AppError
 from app.models.oracle import OracleOutcome, OracleSignal
 from app.models.settings import UserSettings
+from app.modules.oracle.board import get_cached_board
 from app.modules.oracle.engine import DEFAULT_WEIGHTS, compute_live_score, generate_signal
 
 router = APIRouter(
@@ -122,6 +123,48 @@ async def performance(_user: CurrentUser, db: DBSession):
 @router.get("/live/{symbol}")
 async def live(symbol: str, _user: CurrentUser, db: DBSession):
     return await compute_live_score(db, symbol)
+
+
+@router.get("/board")
+async def board(
+    _user: CurrentUser,
+    direction: str | None = Query(default=None, regex="^(bullish|bearish)$"),
+    min_modules: int = Query(default=3, ge=2, le=8),
+    min_score: int = Query(default=0, ge=0, le=100),
+):
+    """Cross-module confluence leaderboard.
+
+    Returns the latest cached snapshot from ``oracle:board`` (Redis), filtered
+    by direction / minimum agreeing modules / minimum |score|. ``stale=True``
+    means the scheduler hasn't computed a snapshot yet — wait one tick.
+    """
+    snapshot = await get_cached_board()
+    if snapshot is None:
+        return {
+            "bullish": [],
+            "bearish": [],
+            "updated_at": None,
+            "stale": True,
+            "min_modules": 3,
+        }
+
+    def _filter(rows: list[dict], sign: int) -> list[dict]:
+        return [
+            r for r in rows
+            if r.get("agreeing_count", 0) >= min_modules
+            and (sign * int(r.get("score") or 0)) >= min_score
+        ]
+
+    bullish = _filter(snapshot.get("bullish", []), 1) if direction in (None, "bullish") else []
+    bearish = _filter(snapshot.get("bearish", []), -1) if direction in (None, "bearish") else []
+    return {
+        "bullish": bullish,
+        "bearish": bearish,
+        "updated_at": snapshot.get("updated_at"),
+        "stale": False,
+        "min_modules": snapshot.get("min_modules", 3),
+        "universe_size": snapshot.get("universe_size"),
+    }
 
 
 class GenerateRequest(BaseModel):
