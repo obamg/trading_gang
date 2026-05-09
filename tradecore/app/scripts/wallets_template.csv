@@ -1,0 +1,8 @@
+name,entity_type,address,chain,label,conviction_score
+# Replace these examples with real addresses you've collected from
+# Lookonchain / Arkham / Cielo / Etherscan label cloud / Nansen.
+# entity_type: desk | fund | smart_money | mm | otc | individual
+# chain:       ethereum | bsc | arbitrum | base | solana
+# conviction_score: 0..1 (optional). Higher = stronger signal in alert payload.
+Example Desk,desk,0x0000000000000000000000000000000000000000,ethereum,Hot wallet 1,0.70
+Example Solana SM,smart_money,11111111111111111111111111111111,solana,Trader 1,0.65
