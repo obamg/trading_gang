@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     # WalletWatch discovery (Layer 2) — PnL-based wallet scoring + leaderboard.
     discovery_enabled: bool = False
 
+    # ListingWatch — detect new listings on Bybit/Binance/OKX (perp + spot)
+    # and run a 4h post-listing signal watcher.
+    listingwatch_enabled: bool = False
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"

@@ -25,6 +25,8 @@ from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.walletwatch import detector as walletwatch_detector
 from app.modules.walletwatch.discovery import engine as discovery_engine
+from app.modules.listingwatch import detector as listingwatch_detector
+from app.modules.listingwatch import watcher as listingwatch_watcher
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.services import redis_service
 from app.services.exchanges import sync as exchange_sync
@@ -251,6 +253,22 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=3,
         id="oracle_board_refresh",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        listingwatch_detector.run_listingwatch_detect,
+        "interval",
+        seconds=60,
+        id="listingwatch_detect",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        listingwatch_watcher.run_listingwatch_tick,
+        "interval",
+        seconds=30,
+        id="listingwatch_watch",
         coalesce=True,
         max_instances=1,
     )

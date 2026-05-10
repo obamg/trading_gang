@@ -236,10 +236,28 @@ class BybitStreamManager:
             if quote_vol >= min_vol:
                 active.append(sym)
 
+        # Force-subscribe set — symbols freshly listed by ListingWatch don't
+        # yet have 24h turnover, so they get filtered out above. Union them
+        # back in here. Membership has a TTL (set by the listingwatch
+        # detector) so this naturally drains as listings age out.
+        try:
+            forced = await redis_service.get_redis().smembers("bybit:force_subscribe") or set()
+        except Exception:
+            forced = set()
+        active_set = set(active)
+        for sym in forced:
+            if sym not in active_set and sym.isascii() and sym.isalnum():
+                active.append(sym)
+
         active.sort()
         self._symbols = active
         await redis_service.set_symbol_list(active)
-        log.info("bybit_symbols_discovered", count=len(active), min_vol_usd=min_vol)
+        log.info(
+            "bybit_symbols_discovered",
+            count=len(active),
+            min_vol_usd=min_vol,
+            forced=len(forced),
+        )
 
     async def _rediscovery_loop(self) -> None:
         interval = settings.binance_symbol_refresh_minutes * 60
