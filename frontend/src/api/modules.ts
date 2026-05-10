@@ -449,3 +449,52 @@ export const newsApi = {
     http.get<Paginated<NewsArticle>>("/news/articles", { params }).then((r) => r.data),
   stats: () => http.get<{ articles_24h: number; bullish_24h: number; bearish_24h: number; high_impact_24h: number }>("/news/stats").then((r) => r.data),
 };
+
+// ---------- ListingWatch ----------
+export interface ListingExchangeRef {
+  exchange: string;
+  market_type: string;
+  symbol: string;
+}
+export interface ListingEvent {
+  id: string;
+  exchange: string;
+  market_type: string;
+  symbol: string;
+  base_asset: string;
+  quote_asset: string;
+  is_cross_listing: boolean;
+  other_exchanges: ListingExchangeRef[] | null;
+  detected_at: string;
+  listed_at: string | null;
+  watcher_ends_at: string;
+  t0_price: number | null;
+  last_price: number | null;
+  high_15m: number | null;
+  low_15m: number | null;
+  high_1h: number | null;
+  low_1h: number | null;
+  last_funding_pct: number | null;
+  signal_count: number;
+  status: string;
+}
+export interface ListingSignal {
+  id: string;
+  listing_id: string;
+  signal_type: string;
+  direction: string;
+  conviction: number;
+  price_at_emit: number | null;
+  seconds_since_t0: number | null;
+  context: Record<string, unknown> | null;
+  emitted_at: string;
+}
+export const listingApi = {
+  active: () => http.get<{ items: ListingEvent[] }>("/listings/active").then((r) => r.data),
+  recent: (days = 7) =>
+    http.get<{ items: ListingEvent[] }>("/listings/recent", { params: { days } }).then((r) => r.data),
+  detail: (id: string) =>
+    http
+      .get<{ event: ListingEvent; signals: ListingSignal[] }>(`/listings/${id}`)
+      .then((r) => r.data),
+};
