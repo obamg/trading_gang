@@ -23,3 +23,4 @@ from app.models.walletwatch_discovery import (  # noqa: F401
     WalletPnlScore,
     WalletTokenPnl,
 )
+from app.models.listing import NewListingEvent, ListingSignal  # noqa: F401
