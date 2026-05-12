@@ -297,6 +297,38 @@ class TelegramService:
                 f"Price: `{d.get('price', '?')}`"
             )
 
+        if module == "listingwatch":
+            exch = (d.get("exchange") or "?").upper()
+            mkt = d.get("market_type") or ""
+            if t == "listing_detected":
+                cross = d.get("is_cross_listing")
+                others = d.get("other_exchanges") or []
+                tag = f" (also on {', '.join(o.upper() for o in others)})" if cross and others else ""
+                return (
+                    f"🆕 *New Listing — {sym}*\n"
+                    f"Exchange: `{exch}` `{mkt}`{tag}\n"
+                    f"Watcher armed for 4h"
+                )
+            direction = (d.get("direction") or "").upper()
+            dir_emoji = "🟢" if direction == "BULLISH" else "🔴" if direction == "BEARISH" else "⚪"
+            conv = d.get("conviction")
+            try:
+                conv_str = f"{float(conv):.2f}"
+            except (TypeError, ValueError):
+                conv_str = "?"
+            mins = d.get("seconds_since_t0")
+            try:
+                mins_str = f"{int(mins) // 60}m"
+            except (TypeError, ValueError):
+                mins_str = "?"
+            label = (t or "signal").replace("_", " ").title()
+            return (
+                f"✨ *ListingWatch — {sym}* {dir_emoji}\n"
+                f"Signal: `{label}` | Conviction: `{conv_str}`\n"
+                f"Exchange: `{exch}` `{mkt}` | T+`{mins_str}`\n"
+                f"Price: `{d.get('price', '?')}`"
+            )
+
         if module == "flowpulse":
             dir_emoji = "🟢" if d.get("direction") == "bullish" else "🔴" if d.get("direction") == "bearish" else "⚪"
             direction = (d.get("direction") or "neutral").upper()
