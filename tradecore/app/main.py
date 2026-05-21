@@ -44,6 +44,7 @@ from app.modules.whaleradar.router import router as whaleradar_router
 from app.modules.exchanges.router import router as exchanges_router
 from app.modules.walletwatch.router import router as walletwatch_router
 from app.modules.listingwatch.router import router as listingwatch_router
+from app.modules.awakening.router import router as awakening_router
 from app.services import redis_service
 from app.services.binance_stream import manager as binance_manager
 from app.services.bybit_stream import manager as bybit_manager
@@ -257,6 +258,7 @@ app.include_router(flowpulse_router)
 app.include_router(exchanges_router)
 app.include_router(walletwatch_router)
 app.include_router(listingwatch_router)
+app.include_router(awakening_router)
 
 
 @app.get("/health")

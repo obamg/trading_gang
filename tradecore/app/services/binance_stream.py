@@ -112,10 +112,21 @@ class BinanceStreamManager:
             if quote_vol >= min_vol:
                 active.append(sym)
 
+        # Force-subscribe set — Awakening promotes sleeping perps that have
+        # spiked but haven't yet crossed min_vol. TTL is set by the detector.
+        try:
+            forced = await redis_service.get_redis().smembers("awakening:force_subscribe:binance") or set()
+        except Exception:
+            forced = set()
+        active_set = set(active)
+        for sym in forced:
+            if sym not in active_set and sym.isascii() and sym.isalnum():
+                active.append(sym)
+
         active.sort()
         self._symbols = active
         await redis_service.set_symbol_list(active)
-        log.info("binance_symbols_discovered", count=len(active), min_vol_usd=min_vol)
+        log.info("binance_symbols_discovered", count=len(active), min_vol_usd=min_vol, forced=len(forced))
 
     async def _rediscovery_loop(self) -> None:
         interval = settings.binance_symbol_refresh_minutes * 60

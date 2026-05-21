@@ -11,7 +11,8 @@ export type ModuleKey =
   | "flowpulse"
   | "newspulse"
   | "walletwatch"
-  | "listingwatch";
+  | "listingwatch"
+  | "awakening";
 
 export interface AlertEvent {
   type: string;

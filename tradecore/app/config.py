@@ -106,6 +106,13 @@ class Settings(BaseSettings):
     # and run a 4h post-listing signal watcher.
     listingwatch_enabled: bool = False
 
+    # Awakening — detect mid-cap perps whose 24h turnover spikes off a
+    # 7-day baseline (catches assets like ZEC before they cross the
+    # binance_min_quote_volume_usd universe gate).
+    awakening_enabled: bool = False
+    awakening_ratio_threshold: float = 3.0
+    awakening_min_turnover_usd: float = 2_000_000.0
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"

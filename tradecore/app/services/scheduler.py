@@ -27,6 +27,7 @@ from app.modules.walletwatch import detector as walletwatch_detector
 from app.modules.walletwatch.discovery import engine as discovery_engine
 from app.modules.listingwatch import detector as listingwatch_detector
 from app.modules.listingwatch import watcher as listingwatch_watcher
+from app.modules.awakening import detector as awakening_detector
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.services import redis_service
 from app.services.exchanges import sync as exchange_sync
@@ -269,6 +270,23 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         seconds=30,
         id="listingwatch_watch",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        awakening_detector.run_awakening_tick,
+        "interval",
+        minutes=5,
+        id="awakening_tick",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        awakening_detector.run_awakening_baseline_refresh,
+        "cron",
+        hour=0,
+        minute=5,
+        id="awakening_baseline",
         coalesce=True,
         max_instances=1,
     )

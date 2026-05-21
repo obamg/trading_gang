@@ -330,6 +330,26 @@ class TelegramService:
                 f"Price: `{d.get('price', '?')}`"
             )
 
+        if module == "awakening":
+            exch = (d.get("exchange") or "?").upper()
+            cur = _fmt_usd(d.get("current_turnover_usd"))
+            base = _fmt_usd(d.get("baseline_turnover_usd"))
+            try:
+                ratio = f"{float(d.get('ratio', 0)):.1f}×"
+            except (TypeError, ValueError):
+                ratio = "?"
+            try:
+                pct = float(d.get("price_change_pct", 0))
+                pct_str = f"{pct:+.2f}%"
+            except (TypeError, ValueError):
+                pct_str = "?"
+            return (
+                f"🌅 *Awakening — {sym}*\n"
+                f"Exchange: `{exch}` | Ratio: `{ratio}`\n"
+                f"Vol: `${cur}` vs baseline `${base}`\n"
+                f"24h: `{pct_str}`"
+            )
+
         if module == "flowpulse":
             dir_emoji = "🟢" if d.get("direction") == "bullish" else "🔴" if d.get("direction") == "bearish" else "⚪"
             direction = (d.get("direction") or "neutral").upper()

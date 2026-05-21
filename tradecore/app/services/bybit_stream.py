@@ -236,14 +236,16 @@ class BybitStreamManager:
             if quote_vol >= min_vol:
                 active.append(sym)
 
-        # Force-subscribe set — symbols freshly listed by ListingWatch don't
-        # yet have 24h turnover, so they get filtered out above. Union them
-        # back in here. Membership has a TTL (set by the listingwatch
-        # detector) so this naturally drains as listings age out.
-        try:
-            forced = await redis_service.get_redis().smembers("bybit:force_subscribe") or set()
-        except Exception:
-            forced = set()
+        # Force-subscribe sets — ListingWatch (new listings, no 24h history)
+        # and Awakening (sleeping perps with a fresh volume spike) both write
+        # here. Membership has a TTL set by the writer so it naturally drains.
+        forced: set[str] = set()
+        for key in ("bybit:force_subscribe", "awakening:force_subscribe:bybit"):
+            try:
+                members = await redis_service.get_redis().smembers(key) or set()
+            except Exception:
+                members = set()
+            forced |= members
         active_set = set(active)
         for sym in forced:
             if sym not in active_set and sym.isascii() and sym.isalnum():

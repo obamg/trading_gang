@@ -83,6 +83,26 @@ function showListingNotification(data: Record<string, unknown>) {
   setTimeout(() => n.close(), 8000);
 }
 
+function showAwakeningNotification(data: Record<string, unknown>) {
+  if (Notification.permission !== "granted") return;
+
+  const symbol = (data.symbol as string) || "?";
+  const exchange = ((data.exchange as string) || "?").toUpperCase();
+  const ratio = typeof data.ratio === "number" ? `${data.ratio.toFixed(1)}×` : "?";
+  const pct = typeof data.price_change_pct === "number"
+    ? `${data.price_change_pct >= 0 ? "+" : ""}${data.price_change_pct.toFixed(2)}%`
+    : "?";
+
+  const n = new Notification(`🌅 Awakening — ${symbol}`, {
+    body: `${exchange} | ${ratio} vs 7d baseline | 24h ${pct}`,
+    icon: "/favicon.ico",
+    tag: `awakening-${symbol}`,
+    requireInteraction: false,
+  });
+
+  setTimeout(() => n.close(), 8000);
+}
+
 export function useNotifications() {
   const alerts = useWebSocketStore((s) => s.alerts);
   const browserNotifs = useSettingsStore((s) => s.browserNotifications);
@@ -105,12 +125,15 @@ export function useNotifications() {
 
       const isDivergence = Boolean(data.is_divergence);
       const isListing = alert.type === "listingwatch_alert";
-      if (!isDivergence && !isListing) continue;
+      const isAwakening = alert.type === "awakening_alert";
+      if (!isDivergence && !isListing && !isAwakening) continue;
 
       if (soundEnabled) playAlertSound();
       if (browserNotifs) {
         if (isListing) {
           showListingNotification(data);
+        } else if (isAwakening) {
+          showAwakeningNotification(data);
         } else {
           showBrowserNotification(
             data.symbol as string,
