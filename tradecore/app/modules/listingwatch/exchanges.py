@@ -26,6 +26,7 @@ class ListedSymbol:
     base_asset: str     # "PEPE"
     quote_asset: str    # "USDT"
     listing_ts_ms: int | None = None  # exchange-reported listing time, when available
+    innovation: bool = False  # Bybit Innovation Zone flag (spot only)
 
 
 # ---------- Bybit ----------
@@ -53,6 +54,37 @@ async def fetch_bybit_perps(client: httpx.AsyncClient) -> list[ListedSymbol]:
                     base_asset=it.get("baseCoin", ""),
                     quote_asset="USDT",
                     listing_ts_ms=int(it.get("launchTime") or 0) or None,
+                )
+            )
+    return out
+
+
+async def fetch_bybit_spot_innovation(client: httpx.AsyncClient) -> list[ListedSymbol]:
+    """Bybit spot listings tagged Innovation Zone via /v5/market/instruments-info.
+
+    The Bybit spot instruments response carries an ``innovation`` field
+    ("0" / "1"). We keep only USDT-quoted, currently trading items where
+    that flag is set."""
+    url = f"{settings.bybit_rest_url}/v5/market/instruments-info"
+    r = await client.get(url, params={"category": "spot", "limit": 1000}, timeout=15)
+    r.raise_for_status()
+    payload = (r.json() or {}).get("result") or {}
+    items = payload.get("list") or []
+    out: list[ListedSymbol] = []
+    for it in items:
+        if (
+            it.get("status") == "Trading"
+            and it.get("quoteCoin") == "USDT"
+            and str(it.get("innovation", "0")) == "1"
+        ):
+            out.append(
+                ListedSymbol(
+                    exchange="bybit",
+                    market_type="spot",
+                    symbol=it.get("symbol", ""),
+                    base_asset=it.get("baseCoin", ""),
+                    quote_asset="USDT",
+                    innovation=True,
                 )
             )
     return out
@@ -169,6 +201,7 @@ async def fetch_okx_perps(client: httpx.AsyncClient) -> list[ListedSymbol]:
 
 FETCHERS = [
     ("bybit_perp", fetch_bybit_perps),
+    ("bybit_spot_innovation", fetch_bybit_spot_innovation),
     ("binance_spot", fetch_binance_spot),
     ("binance_perp", fetch_binance_perps),
     ("okx_spot", fetch_okx_spot),

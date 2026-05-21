@@ -42,6 +42,47 @@ function showBrowserNotification(symbol: string, zScore: number, pricePct: numbe
   setTimeout(() => n.close(), 8000);
 }
 
+function showListingNotification(data: Record<string, unknown>) {
+  if (Notification.permission !== "granted") return;
+
+  const symbol = (data.symbol as string) || "?";
+  const exchange = ((data.exchange as string) || "?").toUpperCase();
+  const market = (data.market_type as string) || "";
+  const subType = (data.type as string) || "";
+
+  let title: string;
+  let body: string;
+  let tag: string;
+
+  if (subType === "listing_detected") {
+    const others = (data.other_exchanges as string[]) || [];
+    const cross = data.is_cross_listing && others.length
+      ? ` (also on ${others.map((o) => o.toUpperCase()).join(", ")})`
+      : "";
+    const innovation = data.innovation ? " 🚀 Innovation Zone" : "";
+    title = `🆕 New Listing — ${symbol}${innovation}`;
+    body = `${exchange} ${market}${cross}`.trim();
+    tag = `listing-${symbol}`;
+  } else {
+    const direction = ((data.direction as string) || "").toUpperCase();
+    const conv = data.conviction;
+    const convStr = typeof conv === "number" ? conv.toFixed(2) : "?";
+    const label = subType.replace(/_/g, " ");
+    title = `✨ ListingWatch — ${symbol}`;
+    body = `${label}${direction ? ` (${direction})` : ""} | Conviction: ${convStr}`;
+    tag = `listing-${symbol}-${subType}`;
+  }
+
+  const n = new Notification(title, {
+    body,
+    icon: "/favicon.ico",
+    tag,
+    requireInteraction: false,
+  });
+
+  setTimeout(() => n.close(), 8000);
+}
+
 export function useNotifications() {
   const alerts = useWebSocketStore((s) => s.alerts);
   const browserNotifs = useSettingsStore((s) => s.browserNotifications);
@@ -60,16 +101,24 @@ export function useNotifications() {
 
     for (const alert of newAlerts) {
       const data = alert.data;
-      if (!data?.is_divergence) continue;
+      if (!data) continue;
+
+      const isDivergence = Boolean(data.is_divergence);
+      const isListing = alert.type === "listingwatch_alert";
+      if (!isDivergence && !isListing) continue;
 
       if (soundEnabled) playAlertSound();
       if (browserNotifs) {
-        showBrowserNotification(
-          data.symbol as string,
-          data.z_score as number,
-          data.price_change_pct as number,
-          data.divergence_score as number,
-        );
+        if (isListing) {
+          showListingNotification(data);
+        } else {
+          showBrowserNotification(
+            data.symbol as string,
+            data.z_score as number,
+            data.price_change_pct as number,
+            data.divergence_score as number,
+          );
+        }
       }
       break; // one notification per batch
     }

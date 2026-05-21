@@ -304,8 +304,9 @@ class TelegramService:
                 cross = d.get("is_cross_listing")
                 others = d.get("other_exchanges") or []
                 tag = f" (also on {', '.join(o.upper() for o in others)})" if cross and others else ""
+                inno = " 🚀 Innovation Zone" if d.get("innovation") else ""
                 return (
-                    f"🆕 *New Listing — {sym}*\n"
+                    f"🆕 *New Listing — {sym}*{inno}\n"
                     f"Exchange: `{exch}` `{mkt}`{tag}\n"
                     f"Watcher armed for 4h"
                 )

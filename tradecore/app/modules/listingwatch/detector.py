@@ -129,6 +129,7 @@ async def run_listingwatch_detect() -> dict[str, int]:
                     "base_asset": s.base_asset,
                     "is_cross_listing": bool(siblings),
                     "other_exchanges": siblings,
+                    "innovation": s.innovation,
                     "detected_at": now.isoformat(),
                 },
             )
