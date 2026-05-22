@@ -31,6 +31,7 @@ from app.models.walletwatch_discovery import (
     WalletPnlScore,
     WalletTokenPnl,
 )
+from app.modules.walletwatch import classifier
 from app.modules.walletwatch.discovery import candidates
 from app.modules.walletwatch.discovery.fetcher import fetch_token_swap_events
 from app.modules.walletwatch.discovery.scorer import (
@@ -146,10 +147,14 @@ async def _refresh_wallet_scores(db: AsyncSession, wallets: set[str]) -> int:
         return 0
     now = datetime.now(timezone.utc)
     refreshed = 0
+    majors = classifier.all_major_addresses()
     for wallet in wallets:
         rows = (
             await db.execute(
-                select(WalletTokenPnl).where(WalletTokenPnl.wallet_address == wallet)
+                select(WalletTokenPnl).where(
+                    WalletTokenPnl.wallet_address == wallet,
+                    WalletTokenPnl.token_address.notin_(majors),
+                )
             )
         ).scalars().all()
         if not rows:

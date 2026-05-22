@@ -111,6 +111,7 @@ async def _from_observed_swaps(db: AsyncSession) -> list[dict]:
         .where(
             WalletSwap.swap_type == "buy",
             WalletSwap.detected_at >= since,
+            WalletSwap.token_out_address.notin_(classifier.all_major_addresses()),
         )
         .group_by(
             WalletSwap.chain,

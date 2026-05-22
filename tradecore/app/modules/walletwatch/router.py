@@ -12,6 +12,7 @@ from app.models.walletwatch_discovery import (
     WalletTokenPnl,
 )
 from app.models.whale_entity import WhaleEntity
+from app.modules.walletwatch.classifier import all_major_addresses
 
 router = APIRouter(prefix="/walletwatch", tags=["walletwatch"])
 
@@ -24,6 +25,7 @@ async def list_recent(
     swap_type: str | None = Query(default=None, regex="^(buy|sell|rotate)$"),
     entity_id: str | None = Query(default=None),
     min_usd: float = Query(default=0, ge=0),
+    include_majors: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
@@ -40,6 +42,8 @@ async def list_recent(
         stmt = stmt.where(WalletSwap.entity_id == entity_id)
     if min_usd > 0:
         stmt = stmt.where(WalletSwap.amount_usd >= min_usd)
+    if not include_majors:
+        stmt = stmt.where(WalletSwap.token_out_address.notin_(all_major_addresses()))
     stmt = stmt.limit(limit).offset(offset)
     rows = (await db.execute(stmt)).all()
     return {
@@ -78,6 +82,7 @@ async def top_tokens(
     db: DBSession,
     chain: str | None = Query(default=None),
     hours: int = Query(default=24, ge=1, le=168),
+    include_majors: bool = Query(default=False),
     limit: int = Query(default=20, ge=1, le=100),
 ):
     """Tokens being net-bought by smart money in the last N hours.
@@ -105,6 +110,8 @@ async def top_tokens(
     )
     if chain:
         stmt = stmt.where(WalletSwap.chain == chain.lower())
+    if not include_majors:
+        stmt = stmt.where(WalletSwap.token_out_address.notin_(all_major_addresses()))
     rows = (await db.execute(stmt)).all()
     return {
         "items": [

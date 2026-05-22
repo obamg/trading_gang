@@ -130,6 +130,20 @@ def classify_swap(
     return "rotate"
 
 
+def all_major_addresses() -> list[str]:
+    """Flat list of every BTC/ETH/native wrapper address across all chains.
+
+    Used as a SQL ``notin_`` filter so API responses hide wallet swaps whose
+    out-token is a major. Addresses are disjoint across chains, so no
+    per-chain tuple is needed.
+    """
+    out: list[str] = []
+    for chain, addrs in MAJORS.items():
+        for a in addrs:
+            out.append(a if chain == "solana" else a.lower())
+    return out
+
+
 def is_interesting_buy(chain: str, swap_type: str, token_out_address: str) -> bool:
     """Per user ask: 'what are they buying beyond BTC and ETH'.
 
