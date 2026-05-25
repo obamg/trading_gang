@@ -163,8 +163,11 @@ jobs:
         with:
           context: ./tradecore
           push: true
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,scope=api,mode=max
+          # cache bust: scope was serving a stale layer that dropped
+          # alembic/versions/ files (ba6b6551 build had only 001-003).
+          # Bumped scope name to force a fresh cache.
+          cache-from: type=gha,scope=api-v2
+          cache-to: type=gha,scope=api-v2,mode=max
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_API }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_API }}:${{ github.sha }}
