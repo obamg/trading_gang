@@ -50,6 +50,12 @@ class NewListingEvent(Base):
     # but "Binance pump" is highly relevant).
     is_cross_listing: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     other_exchanges: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    # Bybit Innovation Zone tier — high volatility / risk. Set when the
+    # symbol itself is innovation-flagged on Bybit, OR when the base asset
+    # has an innovation sibling in the same detection snapshot (e.g. a
+    # Bybit perp whose spot pair is in Innovation Zone).
+    innovation: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     # ^ JSON list of {"exchange": "bybit", "market_type": "perp", "symbol": "PEPEUSDT"}
 
     # Listing timing.

@@ -25,6 +25,7 @@ def _serialize_event(e: NewListingEvent) -> dict:
         "quote_asset": e.quote_asset,
         "is_cross_listing": e.is_cross_listing,
         "other_exchanges": e.other_exchanges,
+        "innovation": e.innovation,
         "detected_at": e.detected_at.isoformat() if e.detected_at else None,
         "listed_at": e.listed_at.isoformat() if e.listed_at else None,
         "watcher_ends_at": e.watcher_ends_at.isoformat() if e.watcher_ends_at else None,

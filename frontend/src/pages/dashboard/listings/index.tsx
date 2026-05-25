@@ -235,6 +235,7 @@ function ActiveListingCard({
           </div>
           <div className="flex flex-col items-end gap-1">
             <ExchangeBadge exchange={event.exchange} market_type={event.market_type} />
+            {event.innovation && <Badge variant="warning">innovation</Badge>}
             {event.is_cross_listing && <Badge variant="new">cross-listing</Badge>}
           </div>
         </div>
@@ -403,12 +404,16 @@ const recentColumns: Column<ListingEvent>[] = [
   {
     key: "is_cross_listing",
     header: "Type",
-    accessor: (e) =>
-      e.is_cross_listing ? (
-        <Badge variant="new">cross-listing</Badge>
-      ) : (
-        <span className="text-textMuted">new</span>
-      ),
+    accessor: (e) => (
+      <div className="flex flex-wrap gap-1">
+        {e.innovation && <Badge variant="warning">innovation</Badge>}
+        {e.is_cross_listing ? (
+          <Badge variant="new">cross-listing</Badge>
+        ) : (
+          !e.innovation && <span className="text-textMuted">new</span>
+        )}
+      </div>
+    ),
   },
   {
     key: "detected_at",

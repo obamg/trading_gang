@@ -26,7 +26,7 @@ class ListedSymbol:
     base_asset: str     # "PEPE"
     quote_asset: str    # "USDT"
     listing_ts_ms: int | None = None  # exchange-reported listing time, when available
-    innovation: bool = False  # Bybit Innovation Zone flag (spot only)
+    innovation: bool = False  # Bybit Innovation Zone risk tier — spot OR perp
 
 
 # ---------- Bybit ----------
@@ -54,6 +54,11 @@ async def fetch_bybit_perps(client: httpx.AsyncClient) -> list[ListedSymbol]:
                     base_asset=it.get("baseCoin", ""),
                     quote_asset="USDT",
                     listing_ts_ms=int(it.get("launchTime") or 0) or None,
+                    # Bybit V5 returns ``innovation`` as a "0"/"1" string on
+                    # the linear perp endpoint too. Cross-reference with the
+                    # spot innovation set still happens in the detector for
+                    # perps whose API response omits the field.
+                    innovation=str(it.get("innovation", "0")) == "1",
                 )
             )
     return out

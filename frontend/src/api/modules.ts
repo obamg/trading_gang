@@ -465,6 +465,7 @@ export interface ListingEvent {
   quote_asset: string;
   is_cross_listing: boolean;
   other_exchanges: ListingExchangeRef[] | null;
+  innovation: boolean;
   detected_at: string;
   listed_at: string | null;
   watcher_ends_at: string;

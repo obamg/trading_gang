@@ -73,6 +73,12 @@ async def run_listingwatch_detect() -> dict[str, int]:
 
     # Build cross-listing index from the current snapshot — by base asset.
     by_base = _index_by_base(current)
+    # Base assets that have at least one innovation-flagged sibling in this
+    # snapshot. Used to propagate the innovation tag onto a perp listing
+    # whose API row didn't carry the field but whose spot pair did.
+    innovation_bases = {
+        base for base, siblings in by_base.items() if any(x.innovation for x in siblings)
+    }
 
     inserted = 0
     by_lookup = {_key(s): s for s in current}
@@ -94,6 +100,7 @@ async def run_listingwatch_detect() -> dict[str, int]:
                 if s.listing_ts_ms
                 else now
             )
+            is_innovation = s.innovation or s.base_asset.upper() in innovation_bases
             stmt = (
                 pg_insert(NewListingEvent)
                 .values(
@@ -104,6 +111,7 @@ async def run_listingwatch_detect() -> dict[str, int]:
                     quote_asset=s.quote_asset,
                     is_cross_listing=bool(siblings),
                     other_exchanges=siblings or None,
+                    innovation=is_innovation,
                     detected_at=now,
                     listed_at=listed_at,
                     watcher_ends_at=ends,
@@ -129,7 +137,7 @@ async def run_listingwatch_detect() -> dict[str, int]:
                     "base_asset": s.base_asset,
                     "is_cross_listing": bool(siblings),
                     "other_exchanges": siblings,
-                    "innovation": s.innovation,
+                    "innovation": is_innovation,
                     "detected_at": now.isoformat(),
                 },
             )
