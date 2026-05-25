@@ -366,6 +366,34 @@ class TelegramService:
                 parts.append(" | ".join(details))
             return "".join(parts)
 
+        if module == "wavewatch":
+            base = d.get("base_asset") or sym
+            mkt = (d.get("market_type") or "?").upper()
+            try:
+                score = f"{float(d.get('score', 0)):.2f}"
+            except (TypeError, ValueError):
+                score = "?"
+            try:
+                vol_x = f"{float(d.get('vol_ratio_now', 0)):.1f}×"
+            except (TypeError, ValueError):
+                vol_x = "?"
+            try:
+                dwell_min = int(d.get("dwell_seconds", 0) // 60)
+                dwell_str = f"{dwell_min}m"
+            except (TypeError, ValueError):
+                dwell_str = "?"
+            try:
+                f = d.get("funding_pct")
+                funding_str = f"{float(f) * 100:+.3f}%" if f is not None else "—"
+            except (TypeError, ValueError):
+                funding_str = "?"
+            return (
+                f"🌊 *WaveWatch — {base}* ({sym})\n"
+                f"Market: `{mkt}` | Score: `{score}` | Dwell: `{dwell_str}`\n"
+                f"Vol burst: `{vol_x}` | Funding: `{funding_str}`\n"
+                f"_Innovation Zone — wave forming_"
+            )
+
         return f"📣 *{module.title()} — {sym}*\n`{t or 'alert'}`"
 
 

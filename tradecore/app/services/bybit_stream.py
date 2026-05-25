@@ -240,7 +240,11 @@ class BybitStreamManager:
         # and Awakening (sleeping perps with a fresh volume spike) both write
         # here. Membership has a TTL set by the writer so it naturally drains.
         forced: set[str] = set()
-        for key in ("bybit:force_subscribe", "awakening:force_subscribe:bybit"):
+        for key in (
+            "bybit:force_subscribe",
+            "awakening:force_subscribe:bybit",
+            "wavewatch:force_subscribe:bybit",
+        ):
             try:
                 members = await redis_service.get_redis().smembers(key) or set()
             except Exception:

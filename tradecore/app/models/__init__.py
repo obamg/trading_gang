@@ -24,3 +24,4 @@ from app.models.walletwatch_discovery import (  # noqa: F401
     WalletTokenPnl,
 )
 from app.models.listing import NewListingEvent, ListingSignal  # noqa: F401
+from app.models.wavewatch import WaveAsset  # noqa: F401

@@ -113,6 +113,16 @@ class Settings(BaseSettings):
     awakening_ratio_threshold: float = 3.0
     awakening_min_turnover_usd: float = 2_000_000.0
 
+    # WaveWatch — continuous surveillance of Bybit Innovation Zone assets.
+    # Fires a "wave incoming" alert when an asset shows prior accumulation
+    # (volume baseline rising + range compression + buy-side bias) AND a
+    # fresh volume + range break confirms the move is starting.
+    wavewatch_enabled: bool = False
+    wavewatch_score_threshold: float = 0.6           # 0..1, pre-wave readiness gate
+    wavewatch_score_dwell_minutes: int = 30          # score must hold above threshold this long
+    wavewatch_max_alerts_per_hour: int = 5           # global cap across all symbols
+    wavewatch_symbol_cooldown_hours: int = 6         # per-symbol re-alert lockout
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
