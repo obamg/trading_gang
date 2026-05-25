@@ -499,3 +499,40 @@ export const listingApi = {
       .get<{ event: ListingEvent; signals: ListingSignal[] }>(`/listings/${id}`)
       .then((r) => r.data),
 };
+
+export interface WaveAsset {
+  id: string;
+  exchange: string;
+  market_type: string;
+  symbol: string;
+  base_asset: string;
+  status: string;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  latest_score: number | null;
+  latest_score_at: string | null;
+  last_alerted_at: string | null;
+}
+export interface WaveLiveScore {
+  score: number;
+  onset: boolean;
+  components: Record<string, number>;
+  vol_ratio_now: number;
+}
+export interface WaveState {
+  asset: WaveAsset;
+  live_score: WaveLiveScore | null;
+  funding_pct: number | null;
+  since_above_threshold: string | null;
+  dwell_seconds: number;
+  last_alert: string | null;
+  candles_available: number;
+}
+export const wavewatchApi = {
+  universe: (status: "active" | "removed" | "all" = "active") =>
+    http
+      .get<{ items: WaveAsset[] }>("/wavewatch/universe", { params: { status } })
+      .then((r) => r.data),
+  state: (symbol: string) =>
+    http.get<WaveState>(`/wavewatch/${symbol}/state`).then((r) => r.data),
+};
