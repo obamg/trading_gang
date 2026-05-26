@@ -36,7 +36,7 @@ WEIGHTS = {
     "funding_warmup": 0.15,
 }
 
-ONSET_VOL_RATIO = 3.0
+ONSET_VOL_RATIO = 2.2
 ONSET_LOOKBACK = 12
 
 
