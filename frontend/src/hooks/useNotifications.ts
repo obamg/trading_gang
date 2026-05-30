@@ -83,6 +83,27 @@ function showListingNotification(data: Record<string, unknown>) {
   setTimeout(() => n.close(), 8000);
 }
 
+function showWavewatchNotification(data: Record<string, unknown>) {
+  if (Notification.permission !== "granted") return;
+
+  const symbol = (data.symbol as string) || "?";
+  const base = (data.base_asset as string) || symbol;
+  const market = ((data.market_type as string) || "").toUpperCase();
+  const score = typeof data.score === "number" ? data.score.toFixed(2) : "?";
+  const volX = typeof data.vol_ratio_now === "number" ? `${data.vol_ratio_now.toFixed(1)}×` : "?";
+  const dwellMin =
+    typeof data.dwell_seconds === "number" ? `${Math.floor(data.dwell_seconds / 60)}m` : "?";
+
+  const n = new Notification(`🌊 WaveWatch — ${base}`, {
+    body: `${market} | Score ${score} | Vol ${volX} | Dwell ${dwellMin}`,
+    icon: "/favicon.ico",
+    tag: `wavewatch-${symbol}`,
+    requireInteraction: false,
+  });
+
+  setTimeout(() => n.close(), 8000);
+}
+
 function showAwakeningNotification(data: Record<string, unknown>) {
   if (Notification.permission !== "granted") return;
 
@@ -126,7 +147,8 @@ export function useNotifications() {
       const isDivergence = Boolean(data.is_divergence);
       const isListing = alert.type === "listingwatch_alert";
       const isAwakening = alert.type === "awakening_alert";
-      if (!isDivergence && !isListing && !isAwakening) continue;
+      const isWavewatch = alert.type === "wavewatch_alert";
+      if (!isDivergence && !isListing && !isAwakening && !isWavewatch) continue;
 
       if (soundEnabled) playAlertSound();
       if (browserNotifs) {
@@ -134,6 +156,8 @@ export function useNotifications() {
           showListingNotification(data);
         } else if (isAwakening) {
           showAwakeningNotification(data);
+        } else if (isWavewatch) {
+          showWavewatchNotification(data);
         } else {
           showBrowserNotification(
             data.symbol as string,
