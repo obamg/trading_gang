@@ -201,6 +201,8 @@ jobs:
           build-args: |
             VITE_API_URL=/api
             VITE_WS_URL=wss://ws.formationdouane.online/ws
+            VITE_GIT_SHA=${{ github.sha }}
+            VITE_BUILD_DATE=${{ github.event.head_commit.timestamp }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_FRONTEND }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_FRONTEND }}:${{ github.sha }}

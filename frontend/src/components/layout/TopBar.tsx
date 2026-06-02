@@ -17,6 +17,30 @@ function MacroMetric({ label, value, decimals = 2, suffix }: { label: string; va
   );
 }
 
+function VersionChip() {
+  const rawSha = import.meta.env.VITE_GIT_SHA ?? "dev";
+  const sha = rawSha.slice(0, 7);
+  const rawDate = import.meta.env.VITE_BUILD_DATE ?? "";
+  // Accept either an ISO timestamp (CI: github.event.head_commit.timestamp)
+  // or a YYYY-MM-DD string. Render as v1.YYYY.MM.DD.
+  let datePart = "";
+  if (rawDate) {
+    const iso = rawDate.length >= 10 ? rawDate.slice(0, 10) : "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      datePart = iso.replaceAll("-", ".");
+    }
+  }
+  const version = datePart ? `v1.${datePart}` : "v1.dev";
+  return (
+    <span
+      title={`build ${rawSha}${rawDate ? ` · ${rawDate}` : ""}`}
+      className="hidden rounded-md border border-borderSubtle bg-bgHover px-2 py-0.5 font-mono text-[10px] tracking-tight text-textMuted md:inline-flex"
+    >
+      {version} · {sha}
+    </span>
+  );
+}
+
 export function TopBar() {
   const metrics = useMacroStore((s) => s.metrics);
   const user = useAuthStore((s) => s.user);
@@ -62,6 +86,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-2 md:gap-3">
+        <VersionChip />
         <NotificationCenter />
         <div className="hidden items-center gap-2 sm:flex">
           <div className="h-7 w-7 rounded-full bg-primary-subtle text-center text-xs font-semibold leading-7 text-primary-400">

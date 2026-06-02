@@ -16,8 +16,12 @@ COPY . .
 # The API base URL is baked in at build time — pass VITE_API_URL/VITE_WS_URL via --build-arg.
 ARG VITE_API_URL=/api
 ARG VITE_WS_URL=/ws
+ARG VITE_GIT_SHA=dev
+ARG VITE_BUILD_DATE
 ENV VITE_API_URL=${VITE_API_URL} \
-    VITE_WS_URL=${VITE_WS_URL}
+    VITE_WS_URL=${VITE_WS_URL} \
+    VITE_GIT_SHA=${VITE_GIT_SHA} \
+    VITE_BUILD_DATE=${VITE_BUILD_DATE}
 RUN npm run build
 
 FROM nginx:1.27-alpine AS serve
