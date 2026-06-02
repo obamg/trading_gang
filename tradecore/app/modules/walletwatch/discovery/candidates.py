@@ -34,6 +34,17 @@ CG_PLATFORMS = ["ethereum", "binance-smart-chain", "arbitrum-one", "base"]
 PLATFORM_TO_CHAIN = {v: k for k, v in CG_PLATFORM.items()}
 PLATFORM_TO_CHAIN.update({"binance-smart-chain": "bsc", "arbitrum-one": "arbitrum"})
 
+# CG distinguishes asset-platform IDs (used for token addresses) from category
+# slugs (used to filter /coins/markets). Most chains use an "-ecosystem"
+# category, except BSC which kept the bare chain slug. Without this mapping
+# the markets endpoint 404s for ethereum/arbitrum-one/base.
+PLATFORM_TO_CATEGORY = {
+    "ethereum": "ethereum-ecosystem",
+    "binance-smart-chain": "binance-smart-chain",
+    "arbitrum-one": "arbitrum-ecosystem",
+    "base": "base-ecosystem",
+}
+
 CG_MARKETS_URL = f"{CG_BASE}/coins/markets"
 TOP_GAINERS_LIMIT = 25
 OBSERVED_LOOKBACK_DAYS = 7
@@ -45,9 +56,10 @@ async def _cg_top_gainers_for_platform(client: httpx.AsyncClient, platform: str)
 
     Returns minimal dicts with chain/address/symbol/name/price.
     """
+    category = PLATFORM_TO_CATEGORY.get(platform, platform)
     params = {
         "vs_currency": "usd",
-        "category": platform,  # CG accepts platform IDs as category for some
+        "category": category,
         "order": "price_change_percentage_7d_desc",
         "per_page": TOP_GAINERS_LIMIT,
         "page": 1,
