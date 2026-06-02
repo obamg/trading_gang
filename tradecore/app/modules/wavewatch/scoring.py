@@ -1,7 +1,8 @@
 """Pre-wave scoring — pure functions.
 
-Takes a list of 5m candles (newest-first, matching ``redis_service.get_candles``
-output) and optional funding rate. Returns:
+Takes 5m candles (newest-first, matching ``redis_service.get_candles``),
+optional aggTrade window (chronological, from ``read_trades_since``), and
+optional funding rate. Returns:
 
   score    — composite readiness 0..1
   onset    — bool, is the wave starting right now?
@@ -9,7 +10,9 @@ output) and optional funding rate. Returns:
 
 Score components (each clamped 0..1, then weight-summed):
 
-  vol_baseline_rising   recent 1h avg volume vs preceding 3h baseline
+  cvd_rising            buy-side dominance + slope check vs price
+                        (uses signed aggTrade flow — replaces the older
+                        direction-blind volume-baseline metric)
   green_ratio           proportion of green candles in last 12 (buy bias proxy)
   range_compression     last-12 stdev vs 12-before stdev (Bollinger squeeze)
   higher_lows           are the last 6 candle lows trending up?
@@ -27,9 +30,10 @@ from dataclasses import dataclass
 from statistics import median, pstdev
 
 
-# Weights sum to 1.0 for perps; for spot (funding=None) weights renormalize.
+# Weights sum to 1.0 when funding + trades both present; missing inputs
+# trigger renormalization in compute_score.
 WEIGHTS = {
-    "vol_baseline_rising": 0.25,
+    "cvd_rising": 0.25,
     "green_ratio": 0.25,
     "range_compression": 0.20,
     "higher_lows": 0.15,
@@ -92,8 +96,85 @@ def _opens(candles: list[dict]) -> list[float]:
     return out
 
 
-def compute_score(candles: list[dict], funding_pct: float | None) -> Score | None:
-    """``candles`` newest-first (Redis lrange order). Needs ≥24 candles
+def _cvd_rising_score(trades: list[dict], closes: list[float]) -> float:
+    """Buy-side dominance and slope vs price. 1.0 = strong recent buying
+    with rising trend; 0.0 = either sellers in control or price-up/CVD-down
+    divergence (the "distribution painted as a rally" case).
+
+    Splits the trade window in half by time. For each half computes
+    ``buy_usd / (buy_usd + sell_usd)`` — 0.5 is balanced, >0.5 buys
+    dominant. Then:
+
+      • base score from second-half dominance: 0.50→0, 0.60→0.5, 0.70+→1.0
+      • bonus if dominance rose from first to second half (slope)
+      • hard zero if price went up while sellers dominated (divergence)
+
+    Returns 0..1 rounded to 3dp. Returns 0.0 on insufficient data so the
+    caller can renormalize weights via the trades-None code path.
+    """
+    if len(trades) < 20 or len(closes) < 4:
+        return 0.0
+
+    parsed: list[tuple[int, float, int]] = []
+    for t in trades:
+        try:
+            usd = float(t.get("usd") or 0)
+            ts = int(t.get("T") or 0)
+            m = int(t.get("m") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts == 0 or usd <= 0:
+            continue
+        parsed.append((ts, usd, m))
+    if len(parsed) < 20:
+        return 0.0
+    parsed.sort()
+
+    mid_ts = (parsed[0][0] + parsed[-1][0]) / 2
+    first_buy = first_sell = second_buy = second_sell = 0.0
+    for ts, usd, m in parsed:
+        bucket_buy = (m == 0)
+        if ts <= mid_ts:
+            if bucket_buy:
+                first_buy += usd
+            else:
+                first_sell += usd
+        else:
+            if bucket_buy:
+                second_buy += usd
+            else:
+                second_sell += usd
+
+    first_total = first_buy + first_sell
+    second_total = second_buy + second_sell
+    if first_total <= 0 or second_total <= 0:
+        return 0.0
+
+    first_dom = first_buy / first_total
+    second_dom = second_buy / second_total
+
+    mid = len(closes) // 2
+    price_first = sum(closes[:mid]) / mid if mid > 0 else closes[0]
+    price_second = sum(closes[mid:]) / (len(closes) - mid)
+    price_up = price_second > price_first * 1.001  # +0.1% threshold
+
+    # Divergence: price rising while buyers don't even own half the flow.
+    if price_up and second_dom < 0.50:
+        return 0.0
+
+    base = max(0.0, min(1.0, (second_dom - 0.50) * 5.0))
+    slope_bonus = max(0.0, min(0.2, (second_dom - first_dom) * 2.0))
+    return round(min(1.0, base + slope_bonus), 3)
+
+
+def compute_score(
+    candles: list[dict],
+    funding_pct: float | None,
+    trades: list[dict] | None = None,
+) -> Score | None:
+    """``candles`` newest-first (Redis lrange order). ``trades`` chronological
+    (oldest-first) from the trades stream — pass None when unavailable and
+    weights renormalize over the other components. Needs ≥24 candles
     (~2h of 5m) — returns None otherwise so detector skips the symbol."""
     if len(candles) < 24:
         return None
@@ -110,18 +191,12 @@ def compute_score(candles: list[dict], funding_pct: float | None) -> Score | Non
 
     components: dict[str, float] = {}
 
-    # --- 1. volume baseline rising ---
-    # Last 1h = last 12 candles. Prior 3h = the 36 before that.
-    recent_vols = vols[-12:]
-    older_vols = vols[-48:-12] if len(vols) >= 48 else vols[:-12]
-    avg_recent = sum(recent_vols) / max(len(recent_vols), 1)
-    avg_older = sum(older_vols) / max(len(older_vols), 1) if older_vols else 0.0
-    if avg_older > 0:
-        ratio = avg_recent / avg_older
-        # Map: 1.0 → 0, 1.5 → 1.0, 2.0+ → 1.0 (saturate)
-        components["vol_baseline_rising"] = max(0.0, min(1.0, (ratio - 1.0) / 0.5))
+    # --- 1. CVD rising (signed-flow replacement for vol_baseline_rising) ---
+    if trades is not None and len(trades) >= 20:
+        components["cvd_rising"] = _cvd_rising_score(trades, closes)
     else:
-        components["vol_baseline_rising"] = 0.0
+        # Sentinel — caller renormalizes weights to exclude this component.
+        components["cvd_rising"] = -1.0
 
     # --- 2. green candle ratio over last 12 ---
     n = min(12, len(closes), len(opens))
@@ -171,12 +246,17 @@ def compute_score(candles: list[dict], funding_pct: float | None) -> Score | Non
         components["funding_warmup"] = 0.0
 
     # --- weighted sum ---
+    # Renormalize over the components we actually have. Funding is None for
+    # spot; cvd_rising is sentinel -1 when trades data was insufficient.
+    skip = set()
     if funding_pct is None:
-        active_weights = {k: v for k, v in WEIGHTS.items() if k != "funding_warmup"}
-        total_w = sum(active_weights.values())
-        score = sum(components[k] * w / total_w for k, w in active_weights.items())
-    else:
-        score = sum(components[k] * w for k, w in WEIGHTS.items())
+        skip.add("funding_warmup")
+    if components.get("cvd_rising", 0.0) < 0:
+        skip.add("cvd_rising")
+        components["cvd_rising"] = 0.0  # don't leak the sentinel into the API
+    active_weights = {k: v for k, v in WEIGHTS.items() if k not in skip}
+    total_w = sum(active_weights.values()) or 1.0
+    score = sum(components[k] * w / total_w for k, w in active_weights.items())
 
     # --- onset ---
     latest_vol = vols[-1] if vols else 0.0

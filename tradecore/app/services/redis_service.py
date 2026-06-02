@@ -108,6 +108,15 @@ async def read_trades(symbol: str, count: int = 100) -> list[dict]:
     return [{"id": eid, **fields} for eid, fields in entries]
 
 
+async def read_trades_since(symbol: str, since_ms: int) -> list[dict]:
+    """Trades since the given epoch-ms, chronological order. Bounded by the
+    stream's maxlen (``TRADES_STREAM_MAX``); for very active symbols the
+    returned window may start later than requested."""
+    r = get_redis()
+    entries = await r.xrange(f"trades:{symbol}", min=f"{since_ms}", max="+")
+    return [{"id": eid, **fields} for eid, fields in entries]
+
+
 # ---------- symbol list ----------
 
 async def set_symbol_list(symbols: list[str]) -> None:

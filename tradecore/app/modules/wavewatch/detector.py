@@ -46,7 +46,10 @@ async def _evaluate_one(
     if len(candles) < 24:
         return None
     funding = await redis_service.get_funding_rate(asset.symbol)
-    result = scoring.compute_score(candles, funding)
+    # CVD over the last hour — chronological order from xrange-by-timestamp.
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    trades = await redis_service.read_trades_since(asset.symbol, now_ms - 3600_000)
+    result = scoring.compute_score(candles, funding, trades=trades)
     if result is None:
         return None
 

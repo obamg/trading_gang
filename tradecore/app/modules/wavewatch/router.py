@@ -80,7 +80,13 @@ async def wavewatch_state(
 
     candles = await redis_service.get_candles(symbol, limit=50)
     funding = await redis_service.get_funding_rate(symbol)
-    score = scoring.compute_score(candles, funding) if len(candles) >= 24 else None
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    trades = await redis_service.read_trades_since(symbol, now_ms - 3600_000)
+    score = (
+        scoring.compute_score(candles, funding, trades=trades)
+        if len(candles) >= 24
+        else None
+    )
     active = (
         scoring.compute_active(
             candles,
