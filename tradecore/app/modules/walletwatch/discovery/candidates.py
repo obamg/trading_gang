@@ -51,10 +51,16 @@ OBSERVED_LOOKBACK_DAYS = 7
 OBSERVED_MIN_BUYERS = 3
 
 
-async def _cg_top_gainers_for_platform(client: httpx.AsyncClient, platform: str) -> list[dict]:
+async def _cg_top_gainers_for_platform(
+    client: httpx.AsyncClient,
+    platform: str,
+    id_to_platforms: dict[str, dict],
+) -> list[dict]:
     """Top tokens on one CG asset platform by 7d % change.
 
-    Returns minimal dicts with chain/address/symbol/name/price.
+    Returns minimal dicts with chain/address/symbol/name/price. /coins/markets
+    doesn't include per-chain contract addresses on its own — those come from
+    the platforms map (built once per refresh from /coins/list).
     """
     category = PLATFORM_TO_CATEGORY.get(platform, platform)
     params = {
@@ -80,7 +86,8 @@ async def _cg_top_gainers_for_platform(client: httpx.AsyncClient, platform: str)
 
     out: list[dict] = []
     for row in data:
-        platforms = row.get("platforms") or {}
+        cg_id = row.get("id")
+        platforms = id_to_platforms.get(cg_id or "") or {}
         addr = platforms.get(platform)
         if not addr:
             continue
@@ -102,11 +109,44 @@ async def _cg_top_gainers_for_platform(client: httpx.AsyncClient, platform: str)
     return out
 
 
+async def _fetch_coin_platforms(client: httpx.AsyncClient) -> dict[str, dict]:
+    """Build a {cg_id: {platform: address}} map from /coins/list?include_platform=true.
+
+    One call per refresh (~10k coin records). Returned dict is keyed by the
+    coin's CG id (e.g. "shiba-inu") with on-chain addresses per platform.
+    Returns {} on failure so the caller degrades gracefully (cg_top_gainers
+    becomes 0, observed_swaps still works).
+    """
+    headers = {}
+    cg_key = getattr(app_settings, "coingecko_api_key", "") or ""
+    if cg_key:
+        headers["x-cg-demo-api-key"] = cg_key
+    try:
+        resp = await client.get(
+            f"{CG_BASE}/coins/list",
+            params={"include_platform": "true"},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        log.warning("discovery_cg_list_failed", err=str(e))
+        return {}
+    return {
+        row.get("id") or "": (row.get("platforms") or {})
+        for row in data
+        if row.get("id")
+    }
+
+
 async def _from_coingecko() -> list[dict]:
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        id_to_platforms = await _fetch_coin_platforms(client)
         rows: list[dict] = []
         for platform in CG_PLATFORMS:
-            rows.extend(await _cg_top_gainers_for_platform(client, platform))
+            rows.extend(
+                await _cg_top_gainers_for_platform(client, platform, id_to_platforms)
+            )
     return rows
 
 
