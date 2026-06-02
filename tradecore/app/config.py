@@ -123,6 +123,17 @@ class Settings(BaseSettings):
     wavewatch_max_alerts_per_hour: int = 5           # global cap across all symbols
     wavewatch_symbol_cooldown_hours: int = 2         # per-symbol re-alert lockout
 
+    # wave_active — cascade/squeeze alerts (different thesis from wave_incoming:
+    # catches the move while it's flushing, not the coil before it). Fires when
+    # the latest 5m bar moves ≥ pct AND vol ≥ ratio× 4h median AND funding is
+    # one-sided against the candle direction (green vs negative funding =
+    # short squeeze; red vs positive funding = long flush).
+    wavewatch_active_pct_threshold: float = 0.03        # 3% in one 5m bar
+    wavewatch_active_vol_ratio: float = 4.0             # 4× the 4h median volume
+    wavewatch_active_funding_extreme: float = 0.001     # 0.1% — funding must be at least this far from neutral
+    wavewatch_active_cooldown_minutes: int = 30         # per-symbol; shorter than incoming because cascades restart
+    wavewatch_active_max_per_hour: int = 10             # separate cap from wave_incoming
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"

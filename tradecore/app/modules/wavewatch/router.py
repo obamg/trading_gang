@@ -15,7 +15,9 @@ from sqlalchemy import desc, select
 from app.dependencies import CurrentUser, DBSession
 from app.models.wavewatch import WaveAsset
 from app.modules.wavewatch import scoring
+from app.config import settings as app_settings
 from app.modules.wavewatch.detector import (
+    LAST_ACTIVE_ALERT_KEY,
     LAST_ALERT_KEY,
     SCORE_KEY,
     SINCE_KEY,
@@ -79,10 +81,22 @@ async def wavewatch_state(
     candles = await redis_service.get_candles(symbol, limit=50)
     funding = await redis_service.get_funding_rate(symbol)
     score = scoring.compute_score(candles, funding) if len(candles) >= 24 else None
+    active = (
+        scoring.compute_active(
+            candles,
+            funding,
+            min_pct_change=float(app_settings.wavewatch_active_pct_threshold),
+            min_vol_ratio=float(app_settings.wavewatch_active_vol_ratio),
+            funding_extreme=float(app_settings.wavewatch_active_funding_extreme),
+        )
+        if len(candles) >= 24
+        else None
+    )
 
     r = redis_service.get_redis()
     since_iso = await r.get(SINCE_KEY.format(sym=symbol))
     last_alert_iso = await r.get(LAST_ALERT_KEY.format(sym=symbol))
+    last_active_alert_iso = await r.get(LAST_ACTIVE_ALERT_KEY.format(sym=symbol))
     now = datetime.now(timezone.utc)
     dwell_s = 0
     if since_iso:
@@ -103,9 +117,20 @@ async def wavewatch_state(
             if score is not None
             else None
         ),
+        "live_active": (
+            {
+                "triggered": active.triggered,
+                "direction": active.direction,
+                "pct_change": active.pct_change,
+                "vol_ratio": active.vol_ratio,
+            }
+            if active is not None
+            else None
+        ),
         "funding_pct": funding,
         "since_above_threshold": since_iso,
         "dwell_seconds": dwell_s,
         "last_alert": last_alert_iso,
+        "last_active_alert": last_active_alert_iso,
         "candles_available": len(candles),
     }

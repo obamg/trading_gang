@@ -89,15 +89,42 @@ function showWavewatchNotification(data: Record<string, unknown>) {
   const symbol = (data.symbol as string) || "?";
   const base = (data.base_asset as string) || symbol;
   const market = ((data.market_type as string) || "").toUpperCase();
-  const score = typeof data.score === "number" ? data.score.toFixed(2) : "?";
-  const volX = typeof data.vol_ratio_now === "number" ? `${data.vol_ratio_now.toFixed(1)}×` : "?";
-  const dwellMin =
-    typeof data.dwell_seconds === "number" ? `${Math.floor(data.dwell_seconds / 60)}m` : "?";
+  const subtype = (data.type as string) || "wave_incoming";
 
-  const n = new Notification(`🌊 WaveWatch — ${base}`, {
-    body: `${market} | Score ${score} | Vol ${volX} | Dwell ${dwellMin}`,
+  let title: string;
+  let body: string;
+
+  if (subtype === "wave_active") {
+    // Cascade / squeeze — directional, real-time
+    const direction = (data.direction as string) || "?";
+    const pct =
+      typeof data.pct_change === "number"
+        ? `${data.pct_change >= 0 ? "+" : ""}${(data.pct_change * 100).toFixed(2)}%`
+        : "?";
+    const volX =
+      typeof data.vol_ratio === "number" ? `${(data.vol_ratio as number).toFixed(1)}×` : "?";
+    const fundingPct =
+      typeof data.funding_pct === "number"
+        ? `${((data.funding_pct as number) * 100).toFixed(3)}%`
+        : "—";
+    const icon = direction === "short_squeeze" ? "🚀" : direction === "long_flush" ? "🔻" : "⚡";
+    title = `${icon} WaveActive — ${base}`;
+    body = `${market} | ${direction.replace("_", " ")} | ${pct} | Vol ${volX} | Fund ${fundingPct}`;
+  } else {
+    // Pre-wave coiling — the original signal
+    const score = typeof data.score === "number" ? data.score.toFixed(2) : "?";
+    const volX =
+      typeof data.vol_ratio_now === "number" ? `${(data.vol_ratio_now as number).toFixed(1)}×` : "?";
+    const dwellMin =
+      typeof data.dwell_seconds === "number" ? `${Math.floor((data.dwell_seconds as number) / 60)}m` : "?";
+    title = `🌊 WaveWatch — ${base}`;
+    body = `${market} | Score ${score} | Vol ${volX} | Dwell ${dwellMin}`;
+  }
+
+  const n = new Notification(title, {
+    body,
     icon: "/favicon.ico",
-    tag: `wavewatch-${symbol}`,
+    tag: `wavewatch-${symbol}-${subtype}`,
     requireInteraction: false,
   });
 

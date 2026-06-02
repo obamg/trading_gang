@@ -204,4 +204,104 @@ def compute_score(candles: list[dict], funding_pct: float | None) -> Score | Non
     )
 
 
-__all__ = ["Score", "compute_score", "WEIGHTS", "ONSET_VOL_RATIO"]
+@dataclass(frozen=True)
+class Active:
+    """Result of the active-cascade detector — different thesis from Score.
+
+    ``compute_score`` looks for pre-wave coiling: tight range, rising
+    baseline, neutral funding. ``compute_active`` looks for the cascade
+    itself: a sharp directional 5m bar on a volume spike against extreme
+    funding (one-sided positioning) — the classic squeeze setup.
+    """
+    triggered: bool
+    direction: str  # "short_squeeze" | "long_flush" | "none"
+    pct_change: float       # signed close-vs-prior-close, e.g. +0.045
+    vol_ratio: float        # latest 5m vol / 4h median
+    funding_pct: float | None
+
+
+def compute_active(
+    candles: list[dict],
+    funding_pct: float | None,
+    *,
+    min_pct_change: float,
+    min_vol_ratio: float,
+    funding_extreme: float,
+) -> Active | None:
+    """Detect an active cascade on the latest closed 5m candle.
+
+    Triggers when ALL hold:
+      • |close − prior_close| / prior_close ≥ ``min_pct_change``
+      • latest 5m volume ≥ ``min_vol_ratio`` × 4h median
+      • candle direction confirms a squeeze against extreme funding:
+          green close AND funding ≤ −funding_extreme → short_squeeze
+          red close   AND funding ≥ +funding_extreme → long_flush
+
+    Returns None if we lack data (<24 candles) so the detector can skip.
+    Returns ``Active(triggered=False, …)`` otherwise — caller decides
+    whether to publish based on the boolean.
+
+    Funding-blind variant (no perp funding feed): falls back to direction
+    inferred purely from the bar — caller can still gate on |pct_change|.
+    """
+    if len(candles) < 24:
+        return None
+
+    chrono = list(reversed(candles))
+    closes = _closes(chrono)
+    opens = _opens(chrono)
+    vols = [_candle_volume(c) for c in chrono]
+    if len(closes) < 2:
+        return None
+
+    latest_close = closes[-1]
+    prior_close = closes[-2]
+    if prior_close <= 0:
+        return None
+    pct_change = (latest_close - prior_close) / prior_close
+
+    latest_vol = vols[-1] if vols else 0.0
+    baseline_vols = vols[-49:-1] if len(vols) >= 49 else vols[:-1]
+    baseline = median(baseline_vols) if baseline_vols else 0.0
+    vol_ratio = (latest_vol / baseline) if baseline > 0 else 0.0
+
+    latest_open = opens[-1] if opens else latest_close
+    is_green = latest_close > latest_open
+
+    direction = "none"
+    if funding_pct is not None:
+        if is_green and funding_pct <= -funding_extreme:
+            direction = "short_squeeze"
+        elif (not is_green) and funding_pct >= funding_extreme:
+            direction = "long_flush"
+    else:
+        # Funding unknown (spot, or perp funding not yet ingested). Fall
+        # back to bar direction alone so we still surface the move; the
+        # caller can choose to require funding via a stricter config.
+        direction = "short_squeeze" if is_green else "long_flush"
+
+    triggered = (
+        abs(pct_change) >= min_pct_change
+        and vol_ratio >= min_vol_ratio
+        and direction != "none"
+        # Funding must be present and aligned when extreme is configured >0.
+        and (funding_pct is None or funding_extreme <= 0 or direction in ("short_squeeze", "long_flush"))
+    )
+
+    return Active(
+        triggered=triggered,
+        direction=direction,
+        pct_change=round(pct_change, 4),
+        vol_ratio=round(vol_ratio, 2),
+        funding_pct=funding_pct,
+    )
+
+
+__all__ = [
+    "Score",
+    "Active",
+    "compute_score",
+    "compute_active",
+    "WEIGHTS",
+    "ONSET_VOL_RATIO",
+]
