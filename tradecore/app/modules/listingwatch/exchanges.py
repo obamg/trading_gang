@@ -126,6 +126,56 @@ async def fetch_binance_spot(client: httpx.AsyncClient) -> list[ListedSymbol]:
     return out
 
 
+# Binance high-volatility risk tiers — values as they actually appear in
+# the BAPI ``tags`` array (verified live against the production endpoint):
+#   "innovation-zone" — legacy Innovation Zone (e.g. SUSHI, GMX, PEPE, PENDLE)
+#   "Seed"            — 2024 successor for newer listings, partially overlaps
+#                       innovation-zone but covers ~6× more tokens today
+# Both denote the same surveillance tier WaveWatch is scoped to. Add
+# "Monitoring" only if the trader desk wants to widen the net — it carries
+# different semantics (assets under review for potential delisting).
+BINANCE_INNOVATION_TAGS = {"innovation-zone", "Seed"}
+
+
+async def fetch_binance_innovation(client: httpx.AsyncClient) -> list[ListedSymbol]:
+    """Binance spot products tagged Innovation Zone or Seed.
+
+    Binance does not expose risk-tier badges through the documented REST
+    API. The BAPI products endpoint (consumed by binance.com itself to
+    render the tag badges in the UI) returns a ``tags`` array per product
+    including ``"Innovation"`` and ``"Seed"`` — both denote the
+    high-volatility tier WaveWatch surveils. The endpoint is undocumented
+    but stable in practice; treat fetch errors as soft and continue.
+    """
+    url = "https://www.binance.com/bapi/asset/v1/public/asset-service/product/get-products"
+    r = await client.get(url, timeout=15)
+    r.raise_for_status()
+    data = (r.json() or {}).get("data") or []
+    out: list[ListedSymbol] = []
+    for it in data:
+        if it.get("q") != "USDT":
+            continue
+        if it.get("st") != "TRADING":
+            continue
+        tags = list(it.get("tags") or [])
+        tag_single = it.get("tag")
+        if tag_single and tag_single not in tags:
+            tags.append(tag_single)
+        if not any(t in BINANCE_INNOVATION_TAGS for t in tags):
+            continue
+        out.append(
+            ListedSymbol(
+                exchange="binance",
+                market_type="spot",
+                symbol=it.get("s", ""),
+                base_asset=it.get("b", ""),
+                quote_asset="USDT",
+                innovation=True,
+            )
+        )
+    return out
+
+
 async def fetch_binance_perps(client: httpx.AsyncClient) -> list[ListedSymbol]:
     """Binance USDT-M perps via /fapi/v1/exchangeInfo."""
     url = f"{settings.binance_rest_url}/fapi/v1/exchangeInfo"

@@ -1,18 +1,22 @@
-"""WaveWatch universe — Bybit Innovation Zone membership.
+"""WaveWatch universe — Innovation Zone membership across Bybit + Binance.
 
 Refreshes the set of innovation-flagged assets every 15 min:
-  • Bybit perp innovation tokens (read from /v5/market/instruments-info)
-  • Bybit spot innovation tokens (already fetched by listingwatch's
-    exchanges.fetch_bybit_spot_innovation — we just reuse it)
+  • Bybit perp innovation tokens (/v5/market/instruments-info, symbolType)
+  • Bybit spot innovation tokens (listingwatch.fetch_bybit_spot_innovation)
+  • Binance spot Innovation/Seed tier (listingwatch.fetch_binance_innovation,
+    via the public BAPI product-tags endpoint)
+  • Binance perps cross-referenced against the spot Innovation/Seed set —
+    a perp counts as innovation if its base asset is tagged on spot
 
-For perps we also write the symbols to ``wavewatch:force_subscribe:bybit``
-with TTL so the existing bybit_stream picks them up even if their 24h
-turnover is below the universe gate. This guarantees we have candle and
-trade data in Redis to score against.
+For perps we write the symbols to per-exchange force-subscribe sets with
+TTL so the streams pick them up even if their 24h turnover is below the
+universe gate:
+  • bybit  → ``wavewatch:force_subscribe:bybit``  (read by bybit_stream)
+  • binance → ``wavewatch:force_subscribe:binance`` (read by binance_stream)
 
-Spot tokens get tracked in the DB but not WS-fed today (would need a
-separate spot stream manager). They show up in /wavewatch/universe but
-do not currently produce wave alerts.
+Spot innovation tokens get tracked in the DB but not WS-fed today (would
+need a separate spot stream manager). They show up in /wavewatch/universe
+but do not currently produce wave alerts.
 """
 from __future__ import annotations
 
@@ -28,12 +32,16 @@ from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.wavewatch import WaveAsset
 from app.modules.listingwatch.exchanges import (
+    ListedSymbol,
+    fetch_binance_innovation,
+    fetch_binance_perps,
     fetch_bybit_perps,
     fetch_bybit_spot_innovation,
 )
 from app.services import redis_service
 
 FORCE_SUB_KEY = "wavewatch:force_subscribe:bybit"
+FORCE_SUB_KEY_BINANCE = "wavewatch:force_subscribe:binance"
 FORCE_SUB_TTL_SECONDS = 30 * 60  # 30min — refreshed every 15min, so 2× the cadence
 
 
@@ -45,26 +53,72 @@ async def refresh_universe() -> dict:
 
     async with httpx.AsyncClient() as client:
         try:
-            perps = await fetch_bybit_perps(client)
+            bybit_perps = await fetch_bybit_perps(client)
         except Exception as e:
-            log.warning("wavewatch_perp_fetch_failed", err=str(e))
-            perps = []
+            log.warning("wavewatch_perp_fetch_failed", exchange="bybit", err=str(e))
+            bybit_perps = []
         try:
-            spots = await fetch_bybit_spot_innovation(client)
+            bybit_spots = await fetch_bybit_spot_innovation(client)
         except Exception as e:
-            log.warning("wavewatch_spot_fetch_failed", err=str(e))
-            spots = []
+            log.warning("wavewatch_spot_fetch_failed", exchange="bybit", err=str(e))
+            bybit_spots = []
+        try:
+            binance_perps_all = await fetch_binance_perps(client)
+        except Exception as e:
+            log.warning("wavewatch_perp_fetch_failed", exchange="binance", err=str(e))
+            binance_perps_all = []
+        try:
+            binance_spots = await fetch_binance_innovation(client)
+        except Exception as e:
+            log.warning("wavewatch_spot_fetch_failed", exchange="binance", err=str(e))
+            binance_spots = []
 
-    innovation_perps = [p for p in perps if p.innovation]
-    # Cross-reference: a perp whose API row didn't carry innovation but
-    # whose base asset has a spot innovation pair is still "innovation".
-    spot_bases = {s.base_asset.upper() for s in spots}
-    perps_by_base = {p.base_asset.upper(): p for p in perps}
-    for base in spot_bases:
-        p = perps_by_base.get(base)
-        if p is not None and p not in innovation_perps:
-            innovation_perps.append(p)
+    # --- Bybit innovation perps ---
+    # Direct flag from instruments-info, plus cross-reference with spot
+    # innovation pairs (a perp whose API row omitted the tag but whose base
+    # asset has a spot innovation pair counts as innovation too).
+    bybit_innovation_perps = [p for p in bybit_perps if p.innovation]
+    bybit_spot_bases = {s.base_asset.upper() for s in bybit_spots}
+    bybit_perps_by_base = {p.base_asset.upper(): p for p in bybit_perps}
+    for base in bybit_spot_bases:
+        p = bybit_perps_by_base.get(base)
+        if p is not None and p not in bybit_innovation_perps:
+            bybit_innovation_perps.append(p)
 
+    # --- Binance innovation perps ---
+    # Binance's perp API does not carry the Innovation/Seed tag; we infer it
+    # by matching perp base assets against the spot Innovation/Seed set.
+    # Bases like "1000PEPE" need normalising — strip leading multiplier so
+    # a 1000PEPEUSDT perp matches a PEPE spot tag.
+    def _strip_multiplier(base: str) -> str:
+        b = base.upper()
+        for prefix in ("1000000", "10000", "1000"):
+            if b.startswith(prefix) and len(b) > len(prefix):
+                return b[len(prefix):]
+        return b
+
+    binance_spot_bases = {s.base_asset.upper() for s in binance_spots}
+    binance_innovation_perps = [
+        p for p in binance_perps_all
+        if _strip_multiplier(p.base_asset) in binance_spot_bases
+    ]
+    # Mark them innovation for downstream consumers — the API row itself
+    # doesn't set the flag.
+    binance_innovation_perps = [
+        ListedSymbol(
+            exchange=p.exchange,
+            market_type=p.market_type,
+            symbol=p.symbol,
+            base_asset=p.base_asset,
+            quote_asset=p.quote_asset,
+            listing_ts_ms=p.listing_ts_ms,
+            innovation=True,
+        )
+        for p in binance_innovation_perps
+    ]
+
+    innovation_perps = bybit_innovation_perps + binance_innovation_perps
+    spots = bybit_spots + binance_spots
     current = innovation_perps + spots
     now = datetime.now(timezone.utc)
 
@@ -102,31 +156,40 @@ async def refresh_universe() -> dict:
                 row.status = "removed"
         await db.commit()
 
-    # Force-subscribe perp symbols to Bybit WS so the stream picks them up
+    # Force-subscribe perp symbols per exchange so each stream picks them up
     # even if 24h turnover is below the gate. Spot symbols aren't WS-fed
     # today (needs a separate spot stream manager — deferred to phase B).
     r = redis_service.get_redis()
-    perp_syms = [p.symbol for p in innovation_perps if p.symbol]
-    if perp_syms:
-        await r.sadd(FORCE_SUB_KEY, *perp_syms)
+    bybit_syms = [p.symbol for p in bybit_innovation_perps if p.symbol]
+    binance_syms = [p.symbol for p in binance_innovation_perps if p.symbol]
+    if bybit_syms:
+        await r.sadd(FORCE_SUB_KEY, *bybit_syms)
         await r.expire(FORCE_SUB_KEY, FORCE_SUB_TTL_SECONDS)
+    if binance_syms:
+        await r.sadd(FORCE_SUB_KEY_BINANCE, *binance_syms)
+        await r.expire(FORCE_SUB_KEY_BINANCE, FORCE_SUB_TTL_SECONDS)
 
     counts = {
-        "perps": len(innovation_perps),
-        "spots": len(spots),
-        "force_subscribed": len(perp_syms),
+        "perps_bybit": len(bybit_innovation_perps),
+        "perps_binance": len(binance_innovation_perps),
+        "spots_bybit": len(bybit_spots),
+        "spots_binance": len(binance_spots),
+        "force_subscribed": len(bybit_syms) + len(binance_syms),
     }
     log.info("wavewatch_universe_refreshed", **counts)
     return counts
 
 
 async def list_active_perps(db: AsyncSession) -> list[WaveAsset]:
-    """Active innovation perps — the symbols the detector should score."""
+    """Active innovation perps — the symbols the detector should score.
+
+    Returns both Bybit and Binance perps; the detector reads candles by
+    bare symbol (``candles:{symbol}``) which both stream managers write to.
+    """
     rows = (
         await db.execute(
             select(WaveAsset).where(
                 WaveAsset.status == "active",
-                WaveAsset.exchange == "bybit",
                 WaveAsset.market_type == "perp",
             )
         )
@@ -134,4 +197,9 @@ async def list_active_perps(db: AsyncSession) -> list[WaveAsset]:
     return list(rows)
 
 
-__all__ = ["refresh_universe", "list_active_perps", "FORCE_SUB_KEY"]
+__all__ = [
+    "refresh_universe",
+    "list_active_perps",
+    "FORCE_SUB_KEY",
+    "FORCE_SUB_KEY_BINANCE",
+]

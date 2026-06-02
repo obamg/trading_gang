@@ -112,12 +112,20 @@ class BinanceStreamManager:
             if quote_vol >= min_vol:
                 active.append(sym)
 
-        # Force-subscribe set — Awakening promotes sleeping perps that have
-        # spiked but haven't yet crossed min_vol. TTL is set by the detector.
-        try:
-            forced = await redis_service.get_redis().smembers("awakening:force_subscribe:binance") or set()
-        except Exception:
-            forced = set()
+        # Force-subscribe sets — Awakening promotes sleeping perps that have
+        # spiked but haven't yet crossed min_vol; WaveWatch promotes Binance
+        # Innovation/Seed perps so they're streamed regardless of turnover.
+        # TTLs are set by the writers, so membership drains naturally.
+        forced: set[str] = set()
+        for key in (
+            "awakening:force_subscribe:binance",
+            "wavewatch:force_subscribe:binance",
+        ):
+            try:
+                members = await redis_service.get_redis().smembers(key) or set()
+            except Exception:
+                members = set()
+            forced |= members
         active_set = set(active)
         for sym in forced:
             if sym not in active_set and sym.isascii() and sym.isalnum():

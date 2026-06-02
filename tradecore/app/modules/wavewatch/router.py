@@ -62,9 +62,17 @@ async def wavewatch_state(
     db: DBSession,
     symbol: str,
 ):
+    # Bare-symbol lookup — Bybit and Binance can share tickers (e.g. LABUSDT
+    # on both), so order by latest_score so the more interesting row wins
+    # and avoid MultipleResultsFound.
     row = (
-        await db.execute(select(WaveAsset).where(WaveAsset.symbol == symbol))
-    ).scalar_one_or_none()
+        await db.execute(
+            select(WaveAsset)
+            .where(WaveAsset.symbol == symbol)
+            .order_by(desc(WaveAsset.latest_score).nullslast())
+            .limit(1)
+        )
+    ).scalars().first()
     if row is None:
         raise HTTPException(status_code=404, detail="symbol not in wavewatch universe")
 
