@@ -282,40 +282,23 @@ jobs:
       - name: Trust VPS host key
         env:
           HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
-          HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
         run: |
           set -eu
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          port="${HOSTINGER_SSH_PORT:-22}"
-          # reject non-numeric ports up front (common secret mix-up)
-          if ! [[ "$port" =~ ^[0-9]+$ ]]; then
-            echo "HOSTINGER_SSH_PORT is not a number (got length ${#port} — check the secret value)"
-            exit 1
-          fi
-          echo "scanning $HOSTINGER_SSH_HOST:$port ..."
-          # Retry — Hostinger occasionally rate-limits SSH from GitHub runner
-          # IPs and the keyscan returns empty / errors. Three attempts with
-          # 5s backoff has consistently recovered in practice.
-          ok=0
-          for attempt in 1 2 3; do
-            if ssh-keyscan -T 10 -p "$port" -H "$HOSTINGER_SSH_HOST" >> ~/.ssh/known_hosts 2>&1; then
-              if [[ -s ~/.ssh/known_hosts ]]; then
-                ok=1
-                break
-              fi
-              echo "attempt $attempt produced no host keys; retrying in 5s..."
-            else
-              echo "attempt $attempt failed; retrying in 5s..."
-            fi
-            sleep 5
-          done
-          if [[ $ok -eq 0 ]]; then
-            echo "ssh-keyscan failed after 3 attempts — VPS unreachable on port $port from GitHub's runners."
-            echo "Check: (1) host value, (2) port value, (3) firewall rules on the VPS / Hostinger panel."
-            exit 1
-          fi
-          echo "host key pinned ($(wc -l < ~/.ssh/known_hosts) entries)"
+          # Pinned host keys, captured 2026-06-03. Public values — SSH host
+          # keys are designed to be published (cf. github.com/github/known-hosts).
+          # Embedded here instead of fetched via ssh-keyscan to avoid the
+          # Hostinger rate-limit that periodically blocks GitHub runner IPs
+          # for longer than any reasonable retry window. To rotate after a
+          # VPS rebuild: ssh-keyscan -t rsa,ecdsa,ed25519 <host>, paste here.
+          {
+            echo "${HOSTINGER_SSH_HOST} ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPZyygdybAyYpQcbf8jMh3KhAJOQBOLAI1IqbjagjQZ+OyKTC9w+ZPE+bVlNNdvDjP82uAGKHlo/KUsKdGjF7A8="
+            echo "${HOSTINGER_SSH_HOST} ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDPTs9n4V9qP+k42n18tG/8PHPH+y/EmLRzyWl1I+2Ua5Y7FqV5xW1zZ9aO/d0IYC8QTwSZCuS6hlrPqfxDx+HeQEriauMPmkN/uHDPCkePbaInYjXJJKlGuuLvB4cXqRrsvlC10tF8ltF6F1aSFO+8VemCqJhPtDH6JJ8wvCFNvhCH1SEf6l7VcTOFvdFWSVGv4bwoTYU+W5oz6ewgjdDUYFCn2RpZzbVuakMb7z6XL2eYCQo/Pf1C3sV9J1QKKYPU4KOq2LbgiuvP6JUwWX8tCeDIszVQbF2MQ9bGAmDFsukGkWSMlNPk8tuYBep+74zoCcxOhKXJoCneIKZTsgzxXcGYHtRA5q0FlwkCApGXLJkgwiYjH5o+e2Et+Yew8EoWmmqCTK05GFAsxGQ4g7QIxdPo6cmKA1+zqJD+/Yo8njVb7qCVROPggMrs2geslvpTnH7gxChTVVIiyxngx6GB3jm8n5pBf1fSUbPB6xBzM5mP1yUao4r1LhAhdlM9TBs="
+            echo "${HOSTINGER_SSH_HOST} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM2x8FqOsJqEhk+O9ieKHnJknPZey7/8mMp3CSeIAkMG"
+          } > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          echo "host keys pinned from workflow (3 entries)"
 
       - name: Sync compose file + deploy script to VPS
         env:
