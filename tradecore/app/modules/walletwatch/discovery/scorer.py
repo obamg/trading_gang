@@ -142,12 +142,20 @@ class TokenPnlRow:
 def compute_wallet_score(rows: list[TokenPnlRow]) -> dict | None:
     """Roll up one wallet's per-token rows into a single score.
 
-    discovery_score = (realized + unrealized) × win_rate × log10(token_count + 1)
+    discovery_score = realized × sqrt(token_count) × win_rate
 
-    The log factor rewards width (a wallet that hit 5 tokens is more
-    interesting than one that hit 1, but not 5x more). The win_rate
-    multiplier punishes wallets that got lucky on one position while
-    losing on most. PnL ≤ 0 → score 0 (uninteresting).
+    Three design choices worth knowing:
+
+      • realized only (not realized + unrealized). Unrealized can evaporate
+        overnight on a meme coin — closed positions are the honest signal.
+      • sqrt(token_count) rewards width more aggressively than log10 did:
+        a 10-token wallet scores √10 ≈ 3.16× a 1-token wallet's width,
+        not log10(11) ≈ 1.04× more. Single-shot lucky wallets no longer
+        dominate the board.
+      • win_rate as a straight multiplier still punishes wallets that hit
+        one moonshot but lose on most.
+
+    Realized ≤ 0 → score 0 (a net-losing wallet is not worth following).
     """
     if not rows:
         return None
@@ -165,10 +173,9 @@ def compute_wallet_score(rows: list[TokenPnlRow]) -> dict | None:
     best_multiple = max(multiples) if multiples else ZERO
 
     token_count = len(rows)
-    pnl = total_realized + total_unrealized
-    if pnl > 0:
-        width_factor = Decimal(str(math.log10(token_count + 1) + 1))
-        discovery_score = pnl * win_rate * width_factor
+    if total_realized > 0:
+        width_factor = Decimal(str(math.sqrt(token_count)))
+        discovery_score = total_realized * win_rate * width_factor
     else:
         discovery_score = ZERO
 

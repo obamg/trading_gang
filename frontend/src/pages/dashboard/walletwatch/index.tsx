@@ -37,8 +37,11 @@ function shortAddr(a: string): string {
 export default function WalletWatchPage() {
   const [chain, setChain] = useState<ChainFilter>("");
   const [minRealized, setMinRealized] = useState<number>(0);
-  const [minWinRate, setMinWinRate] = useState<number>(0);
-  const [minTokens, setMinTokens] = useState<number>(1);
+  // Defaults gate out single-shot / lucky wallets. With these, the board
+  // shows only wallets that won on >=5 different tokens at >=70% — a real
+  // track record, not a one-trade fluke. User can relax in the UI.
+  const [minWinRate, setMinWinRate] = useState<number>(0.7);
+  const [minTokens, setMinTokens] = useState<number>(5);
   const [onlyUnpromoted, setOnlyUnpromoted] = useState<boolean>(true);
   const [selected, setSelected] = useState<DiscoveryRow | null>(null);
 
