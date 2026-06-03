@@ -141,8 +141,9 @@ class TestWalletScore:
         assert score["win_rate"] == Decimal("1.0000")
         assert score["best_multiple"] == Decimal("2.5")
         assert score["token_count"] == 1
-        # discovery_score = 150 × 1.0 × log10(2)+1 ≈ 150 × 1.301 = 195.16
-        assert score["discovery_score"] > Decimal("150")
+        # discovery_score = realized × win_rate × sqrt(tokens)
+        #                 = 100 × 1.0 × sqrt(1) = 100. (Unrealized not counted.)
+        assert score["discovery_score"] == Decimal("100")
 
     def test_mixed_wins_and_losses(self):
         score = compute_wallet_score(
