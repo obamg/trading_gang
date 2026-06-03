@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ExternalLink } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Table, type Column } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
@@ -15,12 +16,56 @@ import {
 } from "@/api/modules";
 
 const COMPONENT_LABEL: Record<string, string> = {
-  vol_baseline_rising: "Volume rising",
+  cvd_rising: "Buy-side flow",
   green_ratio: "Buy bias",
   range_compression: "Compression",
   higher_lows: "Higher lows",
   funding_warmup: "Funding",
 };
+
+function tradeUrl(asset: Pick<WaveAsset, "exchange" | "market_type" | "symbol" | "base_asset">): string | null {
+  const base = asset.base_asset?.toUpperCase();
+  const sym = asset.symbol?.toUpperCase();
+  if (!base || !sym) return null;
+  if (asset.exchange === "bybit") {
+    return asset.market_type === "spot"
+      ? `https://www.bybit.com/en-US/trade/spot/${base}/USDT`
+      : `https://www.bybit.com/trade/usdt/${sym}`;
+  }
+  if (asset.exchange === "binance") {
+    return asset.market_type === "spot"
+      ? `https://www.binance.com/en/trade/${base}_USDT?type=spot`
+      : `https://www.binance.com/en/futures/${sym}`;
+  }
+  return null;
+}
+
+function TradeLink({
+  asset,
+  variant = "icon",
+}: {
+  asset: Pick<WaveAsset, "exchange" | "market_type" | "symbol" | "base_asset">;
+  variant?: "icon" | "label";
+}) {
+  const url = tradeUrl(asset);
+  if (!url) return null;
+  const label =
+    asset.exchange === "bybit" ? "Open on Bybit" : "Open on Binance";
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title={label}
+      aria-label={label}
+      className="inline-flex items-center gap-1 rounded-md border border-borderSubtle px-1.5 py-0.5 text-[11px] text-textSecondary hover:bg-bgHover hover:text-textPrimary"
+    >
+      <ExternalLink size={12} />
+      {variant === "label" && <span>{label}</span>}
+    </a>
+  );
+}
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "—";
@@ -141,6 +186,11 @@ export default function WaveWatchPage() {
         a.latest_score_at ? new Date(a.latest_score_at).getTime() : 0,
       sortable: true,
     },
+    {
+      key: "open",
+      header: "",
+      accessor: (a) => <TradeLink asset={a} />,
+    },
   ];
 
   return (
@@ -209,16 +259,16 @@ export default function WaveWatchPage() {
             : ""
         }
       >
-        {selected && <WaveDetail symbol={selected.symbol} />}
+        {selected && <WaveDetail asset={selected} />}
       </Modal>
     </div>
   );
 }
 
-function WaveDetail({ symbol }: { symbol: string }) {
+function WaveDetail({ asset }: { asset: WaveAsset }) {
   const stateQ = useQuery({
-    queryKey: ["wavewatch", "state", symbol],
-    queryFn: () => wavewatchApi.state(symbol),
+    queryKey: ["wavewatch", "state", asset.symbol],
+    queryFn: () => wavewatchApi.state(asset.symbol),
     refetchInterval: 15_000,
   });
 
@@ -232,6 +282,9 @@ function WaveDetail({ symbol }: { symbol: string }) {
 
   return (
     <div className="space-y-3 text-sm">
+      <div>
+        <TradeLink asset={asset} variant="label" />
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <div className="text-xs text-textMuted">Live score</div>
