@@ -97,7 +97,7 @@ export default function WalletWatchPage() {
         </div>
         <div className="flex flex-col items-end gap-1">
           <LiveIndicator />
-          <LastUpdated date={lastUpdated} />
+          <LastUpdated date={lastUpdated} label="Last scored" />
         </div>
       </header>
 

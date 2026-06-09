@@ -228,3 +228,58 @@ async def test_price_at_returns_closest():
     assert price_at(series, 1100) == 0.5  # closest to 1000
     assert price_at(series, 2100) == 0.7  # closest to 2000
     assert price_at([], 1000) is None
+
+
+# ---------- auto-promote helpers ----------
+
+
+class _ScoreStub:
+    """Duck-typed stand-in for WalletPnlScore — promote helpers only touch a
+    few fields and we don't need a real ORM instance to exercise them."""
+
+    def __init__(self, **kw):
+        self.wallet_address = kw.get("wallet_address", "0x" + "a" * 40)
+        self.chain = kw.get("chain", "ethereum")
+        self.token_count = kw.get("token_count", 5)
+        self.win_rate = kw.get("win_rate", Decimal("0.8"))
+        self.promoted_at = kw.get("promoted_at")
+        self.promoted_entity_id = kw.get("promoted_entity_id")
+
+
+class TestPromoteHelpers:
+    def test_short_addr_truncates_long_addresses(self):
+        from app.modules.walletwatch.discovery.promote import _short_addr
+
+        addr = "0x3650abcdef1234567890abcdef1234567890b5b8"
+        assert _short_addr(addr) == "0x3650…b5b8"
+
+    def test_short_addr_passes_short_strings_through(self):
+        from app.modules.walletwatch.discovery.promote import _short_addr
+
+        assert _short_addr("0xabc") == "0xabc"
+        assert _short_addr("") == ""
+
+    def test_default_entity_name_is_per_wallet_unique(self):
+        from app.modules.walletwatch.discovery.promote import _default_entity_name
+
+        s1 = _ScoreStub(wallet_address="0x3650abcdef1234567890abcdef1234567890b5b8")
+        s2 = _ScoreStub(wallet_address="0x42e2abcdef1234567890abcdef1234567890e4748")
+        n1 = _default_entity_name(s1)
+        n2 = _default_entity_name(s2)
+        assert n1 != n2
+        assert n1.startswith("PnL Discovery ")
+
+    def test_conviction_scales_with_token_count(self):
+        from app.modules.walletwatch.discovery.promote import _conviction_for
+
+        narrow = _ScoreStub(win_rate=Decimal("0.8"), token_count=1)
+        wide = _ScoreStub(win_rate=Decimal("0.8"), token_count=10)
+        # 0.8 × 1.1 = 0.88 vs 0.8 × 2.0 = 1.60 (clamped to 1.0)
+        assert _conviction_for(narrow) == Decimal("0.880")
+        assert _conviction_for(wide) == Decimal("1.0")
+
+    def test_conviction_is_clamped_to_one(self):
+        from app.modules.walletwatch.discovery.promote import _conviction_for
+
+        s = _ScoreStub(win_rate=Decimal("1.0"), token_count=20)
+        assert _conviction_for(s) == Decimal("1.0")

@@ -13,6 +13,7 @@ from app.models.walletwatch_discovery import (
 )
 from app.models.whale_entity import WhaleEntity
 from app.modules.walletwatch.classifier import all_major_addresses
+from app.modules.walletwatch.discovery.promote import promote_score
 
 router = APIRouter(prefix="/walletwatch", tags=["walletwatch"])
 
@@ -278,53 +279,19 @@ async def discovery_promote(
 ):
     """Promote a discovered wallet into whale_entities (manual review gate).
 
-    Idempotent — re-promoting an already-promoted wallet is a no-op.
+    Idempotent — re-promoting an already-promoted wallet is a no-op. Shares
+    the promotion logic with the scheduler's auto-promote job so both paths
+    create identically-shaped entities.
     """
-    from app.models.whale_entity import WhaleEntity, WhaleEntityAddress
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
     addr = wallet_address.lower() if wallet_address.startswith("0x") else wallet_address
     score = (
         await db.execute(select(WalletPnlScore).where(WalletPnlScore.wallet_address == addr))
     ).scalar_one_or_none()
     if score is None:
         return {"ok": False, "reason": "wallet_not_in_discovery"}
-    if score.promoted_at is not None:
-        return {"ok": True, "reason": "already_promoted", "entity_id": str(score.promoted_entity_id)}
-
-    entity = (
-        await db.execute(select(WhaleEntity).where(WhaleEntity.name == name))
-    ).scalar_one_or_none()
-    if entity is None:
-        from decimal import Decimal as _D
-
-        # Map win_rate × normalized score into a 0..1 conviction estimate.
-        conviction = min(float(score.win_rate) * (1 + min(score.token_count, 10) / 10.0), 1.0)
-        entity = WhaleEntity(
-            name=name,
-            entity_type=entity_type,
-            conviction_score=_D(str(round(conviction, 3))),
-        )
-        db.add(entity)
-        await db.flush()
-
-    db.add(
-        WhaleEntityAddress(
-            entity_id=entity.id,
-            address=addr,
-            chain=score.chain,
-            label="auto-promoted",
-        )
-    )
-    score.promoted_at = datetime.now(timezone.utc)
-    score.promoted_entity_id = entity.id
+    result = await promote_score(db, score, name=name, entity_type=entity_type)
     await db.commit()
-    return {
-        "ok": True,
-        "entity_id": str(entity.id),
-        "wallet_address": addr,
-        "promoted_at": score.promoted_at.isoformat(),
-    }
+    return result
 
 
 @router.get("/stats")

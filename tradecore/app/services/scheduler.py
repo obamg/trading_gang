@@ -25,6 +25,7 @@ from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.walletwatch import detector as walletwatch_detector
 from app.modules.walletwatch.discovery import engine as discovery_engine
+from app.modules.walletwatch.discovery import promote as discovery_promote
 from app.modules.listingwatch import detector as listingwatch_detector
 from app.modules.listingwatch import watcher as listingwatch_watcher
 from app.modules.awakening import detector as awakening_detector
@@ -247,6 +248,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         hours=1,
         id="discovery_score_candidates",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        discovery_promote.auto_promote_job,
+        "interval",
+        hours=1,
+        id="discovery_auto_promote",
         coalesce=True,
         max_instances=1,
     )

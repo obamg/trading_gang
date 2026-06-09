@@ -102,6 +102,20 @@ class Settings(BaseSettings):
     # WalletWatch discovery (Layer 2) — PnL-based wallet scoring + leaderboard.
     discovery_enabled: bool = False
 
+    # Auto-promote: when enabled, the scheduler promotes WalletPnlScore rows
+    # that clear ALL four gates (score, realized PnL, win rate, token count)
+    # straight into whale_entities so the WalletWatch detector starts alerting
+    # on their swaps. Off by default — turn on after watching the discovery
+    # leaderboard for a few cycles. Thresholds are conservative on purpose: a
+    # false positive pollutes the alert stream with a junk wallet, and one
+    # bad promotion costs more than a missed good one.
+    discovery_auto_promote_enabled: bool = False
+    discovery_auto_promote_min_score: float = 250_000.0
+    discovery_auto_promote_min_realized_usd: float = 50_000.0
+    discovery_auto_promote_min_win_rate: float = 0.7
+    discovery_auto_promote_min_token_count: int = 5
+    discovery_auto_promote_max_per_tick: int = 5
+
     # ListingWatch — detect new listings on Bybit/Binance/OKX (perp + spot)
     # and run a 4h post-listing signal watcher.
     listingwatch_enabled: bool = False
