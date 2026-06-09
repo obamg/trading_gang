@@ -148,6 +148,23 @@ class Settings(BaseSettings):
     wavewatch_active_cooldown_minutes: int = 30         # per-symbol; shorter than incoming because cascades restart
     wavewatch_active_max_per_hour: int = 10             # separate cap from wave_incoming
 
+    # WaveBot — paper-trading bot driven by wave_active alerts. Off by default;
+    # flip BOT_ENABLED once you've watched the listener log for a session and
+    # trust the veto behaviour. v1 is paper-only — no order routing.
+    bot_enabled: bool = False
+    bot_paper_equity_initial: float = 10_000.0
+    bot_position_size_pct: float = 0.05          # 5% notional per trade
+    bot_max_concurrent: int = 5                  # → 25% max exposure at full
+    bot_take_profit_r_multiple: float = 2.0      # TP at 2R, simple to evaluate
+    bot_stop_buffer_pct: float = 0.0005          # 0.05% past the candle extreme
+    bot_per_symbol_cooldown_minutes: int = 120   # no re-entry for 2h after close
+    bot_daily_drawdown_cap_pct: float = 0.05     # kill switch at -5% from daily anchor
+    bot_oracle_veto_long_below: float = -30.0    # skip longs when oracle is bearish
+    bot_oracle_veto_short_above: float = 30.0    # skip shorts when oracle is bullish
+    bot_news_veto_window_minutes: int = 30       # skip if high-impact news in last N min
+    bot_entry_delay_seconds: int = 60            # wait one 1m bar before filling
+    bot_monitor_tick_seconds: int = 30           # how often to check open positions for stop/TP
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"

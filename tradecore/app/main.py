@@ -32,6 +32,7 @@ from app.modules.gemradar.router import router as gemradar_router
 from app.modules.liquidmap.router import router as liquidmap_router
 from app.modules.liquidmap.tracker import listener as liquidation_listener
 from app.modules.oracle.listener import trigger as oracle_trigger
+from app.modules.bot.listener import listener as bot_listener
 from app.modules.macropulse.router import router as macropulse_router
 from app.modules.oracle.router import router as oracle_router
 from app.modules.performance.router import router as performance_router
@@ -46,6 +47,7 @@ from app.modules.walletwatch.router import router as walletwatch_router
 from app.modules.listingwatch.router import router as listingwatch_router
 from app.modules.awakening.router import router as awakening_router
 from app.modules.wavewatch.router import router as wavewatch_router
+from app.modules.bot.router import router as bot_router
 from app.services import redis_service
 from app.services.binance_stream import manager as binance_manager
 from app.services.bybit_stream import manager as bybit_manager
@@ -128,10 +130,13 @@ async def _run_leader_loop(r, stop_event: asyncio.Event) -> None:
         await telegram_service.start()
         await liquidation_listener.start()
         await oracle_trigger.start()
+        if getattr(settings, "bot_enabled", False):
+            await bot_listener.start()
         log.info("worker_became_leader", token=token, market_source=source)
 
     async def _stop_singletons() -> None:
         try:
+            await bot_listener.stop()
             await oracle_trigger.stop()
             await liquidation_listener.stop()
             await telegram_service.stop()
@@ -261,6 +266,7 @@ app.include_router(walletwatch_router)
 app.include_router(listingwatch_router)
 app.include_router(awakening_router)
 app.include_router(wavewatch_router)
+app.include_router(bot_router)
 
 
 @app.get("/health")

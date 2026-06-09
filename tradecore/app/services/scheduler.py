@@ -26,6 +26,7 @@ from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.walletwatch import detector as walletwatch_detector
 from app.modules.walletwatch.discovery import engine as discovery_engine
 from app.modules.walletwatch.discovery import promote as discovery_promote
+from app.modules.bot import monitor as bot_monitor
 from app.modules.listingwatch import detector as listingwatch_detector
 from app.modules.listingwatch import watcher as listingwatch_watcher
 from app.modules.awakening import detector as awakening_detector
@@ -256,6 +257,23 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         hours=1,
         id="discovery_auto_promote",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        bot_monitor.run_monitor_tick,
+        "interval",
+        seconds=int(settings.bot_monitor_tick_seconds),
+        id="bot_monitor",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        bot_monitor.run_daily_anchor_reset,
+        "cron",
+        hour=0,
+        minute=0,
+        id="bot_daily_anchor",
         coalesce=True,
         max_instances=1,
     )
