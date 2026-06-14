@@ -536,3 +536,93 @@ export const wavewatchApi = {
   state: (symbol: string) =>
     http.get<WaveState>(`/wavewatch/${symbol}/state`).then((r) => r.data),
 };
+
+// ---------- WaveBot ----------
+export interface BotConfig {
+  position_size_pct: number;
+  r_multiple: number;
+  stop_buffer_pct: number;
+  per_symbol_cooldown_minutes: number;
+  daily_drawdown_cap_pct: number;
+  oracle_veto_long_below: number;
+  oracle_veto_short_above: number;
+  news_veto_window_minutes: number;
+  entry_delay_seconds: number;
+}
+export interface BotStatus {
+  enabled: boolean;
+  paper_equity: number;
+  daily_anchor: number;
+  drawdown_pct: number;
+  kill_switch_tripped: boolean;
+  concurrent_open: number;
+  max_concurrent: number;
+  config: BotConfig;
+}
+export interface BotTrade {
+  id: string;
+  symbol: string;
+  exchange: string;
+  direction: "long" | "short";
+  alert_type: string;
+  alert_detected_at: string;
+  entry_price: number;
+  entry_at: string;
+  signal_high: number;
+  signal_low: number;
+  notional_usd: number;
+  qty: number;
+  stop_price: number;
+  take_profit_price: number;
+  paper_equity_at_entry: number;
+  close_price: number | null;
+  closed_at: string | null;
+  close_reason: "stop" | "tp" | "manual" | "kill_switch" | null;
+  realized_pnl_usd: number | null;
+  realized_r: number | null;
+  oracle_score_at_entry: number | null;
+  vol_ratio: number | null;
+  funding_pct: number | null;
+  pct_change: number | null;
+  status: "open" | "closed";
+}
+export interface BotSkippedSignal {
+  id: string;
+  symbol: string;
+  exchange: string;
+  alert_type: string;
+  direction: string;
+  alert_detected_at: string;
+  skip_reason: string;
+  oracle_score: number | null;
+  context: Record<string, unknown> | null;
+  created_at: string;
+}
+export interface BotEquityPoint {
+  day: string | null;
+  realized_pnl_usd: number;
+  n_trades: number;
+}
+export const botApi = {
+  status: () => http.get<BotStatus>("/bot/status").then((r) => r.data),
+  positions: () =>
+    http.get<{ items: BotTrade[] }>("/bot/positions").then((r) => r.data),
+  trades: (params?: { symbol?: string; reason?: string; limit?: number; offset?: number }) =>
+    http
+      .get<{ items: BotTrade[]; limit: number; offset: number }>("/bot/trades", { params })
+      .then((r) => r.data),
+  equityCurve: (days = 30) =>
+    http
+      .get<{ items: BotEquityPoint[]; current_equity: number }>("/bot/equity-curve", {
+        params: { days },
+      })
+      .then((r) => r.data),
+  skipped: (params?: { reason?: string; symbol?: string; limit?: number }) =>
+    http
+      .get<{ items: BotSkippedSignal[] }>("/bot/skipped", { params })
+      .then((r) => r.data),
+  closeManual: (id: string) =>
+    http.post<{ ok: boolean; id: string; close_price: number }>(`/bot/close/${id}`).then((r) => r.data),
+  resetPaper: () =>
+    http.post<{ ok: boolean; paper_equity: number }>("/bot/reset-paper").then((r) => r.data),
+};

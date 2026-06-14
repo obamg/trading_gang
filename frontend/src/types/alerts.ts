@@ -13,7 +13,8 @@ export type ModuleKey =
   | "walletwatch"
   | "listingwatch"
   | "awakening"
-  | "wavewatch";
+  | "wavewatch"
+  | "bot";
 
 export interface AlertEvent {
   type: string;
