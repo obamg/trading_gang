@@ -28,6 +28,7 @@ class BotTrade(Base):
     id: Mapped[UUID] = uuid_pk()
     symbol: Mapped[str] = mapped_column(String(40), nullable=False)
     exchange: Mapped[str] = mapped_column(String(20), nullable=False)
+    market_type: Mapped[str | None] = mapped_column(String(10), nullable=True)  # perp | spot
     direction: Mapped[str] = mapped_column(String(10), nullable=False)  # long | short
     alert_type: Mapped[str] = mapped_column(String(20), nullable=False)
     alert_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

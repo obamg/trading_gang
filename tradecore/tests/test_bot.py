@@ -265,19 +265,16 @@ class TestParseCandle:
 
 
 class TestExchangeSupport:
-    def test_supports_only_market_data_source(self, monkeypatch):
+    def test_supports_bybit_and_binance(self):
         from app.modules.bot import vetoes
-        from app.config import settings
 
-        monkeypatch.setattr(settings, "market_data_source", "bybit")
         assert vetoes.supports_exchange("bybit") is True
         assert vetoes.supports_exchange("BYBIT") is True
-        assert vetoes.supports_exchange("binance") is False
+        assert vetoes.supports_exchange("binance") is True
+        assert vetoes.supports_exchange("BINANCE") is True
 
-    def test_supports_nothing_when_source_is_unset(self, monkeypatch):
+    def test_rejects_unknown_exchange(self):
         from app.modules.bot import vetoes
-        from app.config import settings
 
-        monkeypatch.setattr(settings, "market_data_source", "")
-        assert vetoes.supports_exchange("bybit") is False
-        assert vetoes.supports_exchange("binance") is False
+        assert vetoes.supports_exchange("okx") is False
+        assert vetoes.supports_exchange("") is False

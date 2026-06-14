@@ -136,6 +136,7 @@ def plan_entry(
     return TradePlan(
         symbol=alert["symbol"],
         exchange=alert["exchange"],
+        market_type=alert.get("market_type"),
         direction=direction,
         alert_type=alert.get("type", "wave_active"),
         alert_detected_at=_parse_dt(alert.get("detected_at")),

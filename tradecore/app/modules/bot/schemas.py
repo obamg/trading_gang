@@ -37,6 +37,7 @@ class CloseReason(str, Enum):
 class TradePlan:
     symbol: str
     exchange: str
+    market_type: str | None
     direction: Direction
     alert_type: str
     alert_detected_at: datetime

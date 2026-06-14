@@ -33,6 +33,7 @@ async def open_paper_trade(
     trade = BotTrade(
         symbol=plan.symbol,
         exchange=plan.exchange,
+        market_type=plan.market_type,
         direction=plan.direction.value,
         alert_type=plan.alert_type,
         alert_detected_at=plan.alert_detected_at,

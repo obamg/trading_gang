@@ -21,15 +21,13 @@ from app.services import redis_service
 
 COOLDOWN_KEY = "bot:cooldown:{symbol}"
 
-# v1 only trades the exchange the market data stream serves. Binance Innovation
-# Zone alerts are logged as EXCHANGE_UNSUPPORTED until we add a Binance kline
-# fetcher (deferred — see strategy doc).
-_SUPPORTED_EXCHANGES = {"bybit"}
+# Bybit uses the in-process WS candle stream; Binance is monitored via REST polls
+# from the bot monitor (see monitor.py:_latest_candle).
+_SUPPORTED_EXCHANGES = {"bybit", "binance"}
 
 
 def supports_exchange(exchange: str) -> bool:
-    source = (app_settings.market_data_source or "").lower()
-    return exchange.lower() == source and exchange.lower() in _SUPPORTED_EXCHANGES
+    return exchange.lower() in _SUPPORTED_EXCHANGES
 
 
 async def already_open(db: AsyncSession, symbol: str) -> bool:

@@ -563,6 +563,7 @@ export interface BotTrade {
   id: string;
   symbol: string;
   exchange: string;
+  market_type: string | null;
   direction: "long" | "short";
   alert_type: string;
   alert_detected_at: string;

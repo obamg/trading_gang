@@ -15,7 +15,7 @@ from decimal import Decimal
 from app.config import settings as app_settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
-from app.modules.bot import equity, executor, strategy, vetoes
+from app.modules.bot import candle_source, equity, executor, strategy, vetoes
 from app.modules.bot.schemas import Direction, SkipReason
 from app.services import redis_service
 
@@ -79,6 +79,7 @@ class BotListener:
     async def _handle_alert(self, alert: dict) -> None:
         symbol = alert.get("symbol")
         exchange = alert.get("exchange", "")
+        market_type = alert.get("market_type")
         base_asset = alert.get("base_asset", "")
         if not symbol:
             return
@@ -113,7 +114,7 @@ class BotListener:
 
         # Read the signal candle (latest 5m bar at alert time). Pulled now —
         # if it disappears during the entry delay, we'd rather fail closed.
-        signal_candle = await redis_service.get_latest_candle(symbol)
+        signal_candle = await candle_source.get_latest_candle(symbol, exchange, market_type)
         if signal_candle is None:
             async with AsyncSessionLocal() as db:
                 await executor.log_skipped(
@@ -125,7 +126,7 @@ class BotListener:
         # single-print spikes that would have already reverted.
         await asyncio.sleep(int(app_settings.bot_entry_delay_seconds))
 
-        entry_candle = await redis_service.get_latest_candle(symbol)
+        entry_candle = await candle_source.get_latest_candle(symbol, exchange, market_type)
         if entry_candle is None:
             async with AsyncSessionLocal() as db:
                 await executor.log_skipped(

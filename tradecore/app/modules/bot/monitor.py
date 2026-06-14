@@ -19,19 +19,20 @@ from app.config import settings as app_settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.bot import BotTrade
-from app.modules.bot import executor, strategy
+from app.modules.bot import candle_source, executor, strategy
 from app.modules.bot.schemas import CloseReason, Direction
-from app.services import redis_service
 
 
 async def _bars_to_check(trade: BotTrade) -> list[dict]:
     """Pull recent 1m candles for the symbol that haven't been observed yet.
 
-    The Redis stream keeps the last 50 candles. We only need bars that
-    closed AFTER the previous monitor tick, but since ticks run every 30s
-    and bars are 1m, scanning the last 5 bars is more than enough.
+    Bybit symbols come from the WS-fed Redis list; Binance symbols are
+    polled via REST. We only need bars after the previous tick — scanning
+    the last 5 is plenty for 30s ticks against 1m bars.
     """
-    candles = await redis_service.get_candles(trade.symbol, limit=5)
+    candles = await candle_source.get_recent_candles(
+        trade.symbol, trade.exchange, trade.market_type, limit=5
+    )
     # Filter to bars on/after entry_at — earlier ones happened before the trade.
     entry_ms = int(trade.entry_at.timestamp() * 1000)
     fresh = []

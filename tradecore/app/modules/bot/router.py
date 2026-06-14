@@ -20,9 +20,8 @@ from sqlalchemy import and_, case, desc, func, select
 from app.config import settings as app_settings
 from app.dependencies import CurrentUser, DBSession
 from app.models.bot import BotSkippedSignal, BotTrade
-from app.modules.bot import equity, executor
+from app.modules.bot import candle_source, equity, executor
 from app.modules.bot.schemas import CloseReason
-from app.services import redis_service
 
 router = APIRouter(prefix="/bot", tags=["bot"])
 
@@ -256,7 +255,7 @@ async def close_manual(_user: CurrentUser, db: DBSession, trade_id: str):
         raise HTTPException(status_code=404, detail="trade not found")
     if trade.status != "open":
         return {"ok": True, "reason": "already_closed", "id": str(trade.id)}
-    candle = await redis_service.get_latest_candle(trade.symbol)
+    candle = await candle_source.get_latest_candle(trade.symbol, trade.exchange, trade.market_type)
     if candle is None:
         raise HTTPException(status_code=409, detail="no candle available for fill")
     fill = Decimal(str(candle.get("c") or candle.get("close") or 0))
@@ -281,6 +280,7 @@ def _serialize_trade(t: BotTrade) -> dict:
         "id": str(t.id),
         "symbol": t.symbol,
         "exchange": t.exchange,
+        "market_type": t.market_type,
         "direction": t.direction,
         "alert_type": t.alert_type,
         "alert_detected_at": t.alert_detected_at.isoformat(),
