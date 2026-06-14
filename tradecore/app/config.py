@@ -164,6 +164,8 @@ class Settings(BaseSettings):
     bot_news_veto_window_minutes: int = 30       # skip if high-impact news in last N min
     bot_entry_delay_seconds: int = 60            # wait one 1m bar before filling
     bot_monitor_tick_seconds: int = 30           # how often to check open positions for stop/TP
+    bot_live_enabled: bool = False               # v2: when true, route fills to a real exchange
+    bot_live_leverage: int = 5                   # v2: isolated leverage on Bybit perps
 
     @property
     def is_production(self) -> bool:

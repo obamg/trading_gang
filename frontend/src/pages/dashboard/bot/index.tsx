@@ -16,6 +16,7 @@ import {
   type BotTrade,
   type BotSkippedSignal,
   type BotEquityPoint,
+  type BotAnalyticsRow,
 } from "@/api/modules";
 
 const SKIP_REASONS = [
@@ -33,7 +34,7 @@ const SKIP_REASONS = [
   "exchange_unsupported",
 ] as const;
 
-type TabKey = "open" | "closed" | "skipped" | "equity";
+type TabKey = "open" | "closed" | "skipped" | "equity" | "analytics";
 
 export default function WaveBotPage() {
   const [tab, setTab] = useState<TabKey>("open");
@@ -99,6 +100,7 @@ export default function WaveBotPage() {
               { key: "closed", label: "Closed trades" },
               { key: "skipped", label: "Skipped signals" },
               { key: "equity", label: "Equity curve" },
+              { key: "analytics", label: "Analytics" },
             ]}
             active={tab}
             onChange={(k) => setTab(k as TabKey)}
@@ -109,6 +111,7 @@ export default function WaveBotPage() {
           {tab === "closed" && <ClosedTradesTab />}
           {tab === "skipped" && <SkippedTab />}
           {tab === "equity" && <EquityCurveTab />}
+          {tab === "analytics" && <AnalyticsTab />}
         </CardBody>
       </Card>
     </div>
@@ -534,5 +537,142 @@ function RelTime({ iso }: { iso: string | null }) {
     <span className="text-xs text-textSecondary" title={d.toLocaleString()}>
       {txt}
     </span>
+  );
+}
+
+// ---------- analytics tab ----------
+
+function AnalyticsTab() {
+  const [days, setDays] = useState(30);
+  const { data, isLoading } = useQuery({
+    queryKey: ["bot", "analytics", days],
+    queryFn: () => botApi.analytics(days),
+    refetchInterval: 60_000,
+  });
+
+  return (
+    <div className="space-y-6 p-4">
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-textSecondary">Window:</span>
+        <Select
+          value={String(days)}
+          onChange={(e) => setDays(parseInt(e.target.value, 10))}
+          className="w-32"
+        >
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+        </Select>
+      </div>
+
+      {isLoading || !data ? (
+        <Skeleton className="h-40" />
+      ) : (
+        <>
+          <AnalyticsSection title="By direction" rows={data.by_direction} labelHeader="Side" />
+          <AnalyticsSection
+            title="By Oracle bucket at entry"
+            rows={data.by_oracle_bucket}
+            labelHeader="Oracle"
+          />
+          <AnalyticsSection
+            title="By hour of day (UTC)"
+            rows={data.by_hour_utc}
+            labelHeader="Hour"
+            labelFormat={(v) => (v === null ? "—" : `${String(v).padStart(2, "0")}:00`)}
+          />
+          <AnalyticsSection title="By symbol" rows={data.by_symbol} labelHeader="Symbol" />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AnalyticsSection({
+  title,
+  rows,
+  labelHeader,
+  labelFormat,
+}: {
+  title: string;
+  rows: BotAnalyticsRow[];
+  labelHeader: string;
+  labelFormat?: (v: string | number | null) => string;
+}) {
+  const cols: Column<BotAnalyticsRow>[] = [
+    {
+      key: "label",
+      header: labelHeader,
+      accessor: (r) => (
+        <span className="font-medium">{labelFormat ? labelFormat(r.label) : String(r.label ?? "—")}</span>
+      ),
+    },
+    { key: "n", header: "N", accessor: (r) => <span className="tabular-nums">{r.n_trades}</span> },
+    { key: "w", header: "W", accessor: (r) => <span className="tabular-nums">{r.wins}</span> },
+    { key: "l", header: "L", accessor: (r) => <span className="tabular-nums">{r.losses}</span> },
+    {
+      key: "wr",
+      header: "Win rate",
+      accessor: (r) =>
+        r.win_rate == null ? (
+          <span className="text-textSecondary">—</span>
+        ) : (
+          <span className="tabular-nums">{(r.win_rate * 100).toFixed(1)}%</span>
+        ),
+    },
+    {
+      key: "r",
+      header: "Σ R",
+      accessor: (r) => (
+        <span
+          className={`tabular-nums ${r.realized_r > 0 ? "text-bullish" : r.realized_r < 0 ? "text-bearish" : ""}`}
+        >
+          {r.realized_r >= 0 ? "+" : ""}
+          {r.realized_r.toFixed(2)}
+        </span>
+      ),
+    },
+    {
+      key: "exp",
+      header: "E[R]/trade",
+      accessor: (r) =>
+        r.expectancy_r == null ? (
+          <span className="text-textSecondary">—</span>
+        ) : (
+          <span
+            className={`tabular-nums ${r.expectancy_r > 0 ? "text-bullish" : r.expectancy_r < 0 ? "text-bearish" : ""}`}
+          >
+            {r.expectancy_r >= 0 ? "+" : ""}
+            {r.expectancy_r.toFixed(3)}
+          </span>
+        ),
+    },
+    {
+      key: "pnl",
+      header: "PnL",
+      accessor: (r) => (
+        <NumberDisplay
+          value={r.realized_pnl_usd}
+          decimals={2}
+          prefix="$"
+          colored
+          sign
+        />
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      <div className="mb-2 text-sm font-semibold text-textPrimary">{title}</div>
+      <Table
+        columns={cols}
+        rows={rows}
+        rowKey={(r) => String(r.label)}
+        dense
+        emptyMessage="No data in window."
+      />
+    </div>
   );
 }

@@ -603,6 +603,23 @@ export interface BotEquityPoint {
   realized_pnl_usd: number;
   n_trades: number;
 }
+export interface BotAnalyticsRow {
+  label: string | number | null;
+  n_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number | null;
+  realized_pnl_usd: number;
+  realized_r: number;
+  expectancy_r: number | null;
+}
+export interface BotAnalytics {
+  days: number;
+  by_direction: BotAnalyticsRow[];
+  by_oracle_bucket: BotAnalyticsRow[];
+  by_symbol: BotAnalyticsRow[];
+  by_hour_utc: BotAnalyticsRow[];
+}
 export const botApi = {
   status: () => http.get<BotStatus>("/bot/status").then((r) => r.data),
   positions: () =>
@@ -617,6 +634,8 @@ export const botApi = {
         params: { days },
       })
       .then((r) => r.data),
+  analytics: (days = 30) =>
+    http.get<BotAnalytics>("/bot/analytics", { params: { days } }).then((r) => r.data),
   skipped: (params?: { reason?: string; symbol?: string; limit?: number }) =>
     http
       .get<{ items: BotSkippedSignal[] }>("/bot/skipped", { params })

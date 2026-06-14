@@ -5,6 +5,7 @@
   GET  /bot/trades         closed trades, filterable
   GET  /bot/equity-curve   daily closed-PnL deltas for the chart
   GET  /bot/skipped        recent skipped signals
+  GET  /bot/analytics      direction/oracle/symbol/hour breakdowns over closed trades
   POST /bot/close/{id}     manual close at last 1m candle close
   POST /bot/reset-paper    dev: reset paper equity
 """
@@ -14,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, case, desc, func, select
 
 from app.config import settings as app_settings
 from app.dependencies import CurrentUser, DBSession
@@ -152,6 +153,96 @@ async def skipped(
             }
             for r in rows
         ]
+    }
+
+
+@router.get("/analytics")
+async def analytics(_user: CurrentUser, db: DBSession, days: int = Query(default=30, ge=1, le=365)):
+    """Breakdown stats over closed trades in the window: direction, oracle bucket,
+    per-symbol top winners/losers, and hour-of-day (UTC). Read-only aggregation."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    base = and_(BotTrade.status == "closed", BotTrade.closed_at >= since)
+
+    wins_expr = func.sum(case((BotTrade.close_reason == "tp", 1), else_=0))
+    losses_expr = func.sum(case((BotTrade.close_reason == "stop", 1), else_=0))
+    pnl_expr = func.coalesce(func.sum(BotTrade.realized_pnl_usd), 0)
+    r_expr = func.coalesce(func.sum(BotTrade.realized_r), 0)
+    n_expr = func.count()
+
+    def _row(label, n, wins, losses, pnl, r_sum):
+        n_i = int(n or 0)
+        wins_i = int(wins or 0)
+        losses_i = int(losses or 0)
+        decided = wins_i + losses_i
+        return {
+            "label": label,
+            "n_trades": n_i,
+            "wins": wins_i,
+            "losses": losses_i,
+            "win_rate": (wins_i / decided) if decided else None,
+            "realized_pnl_usd": float(pnl or 0),
+            "realized_r": float(r_sum or 0),
+            "expectancy_r": (float(r_sum or 0) / n_i) if n_i else None,
+        }
+
+    # 1. By direction
+    dir_rows = (
+        await db.execute(
+            select(BotTrade.direction, n_expr, wins_expr, losses_expr, pnl_expr, r_expr)
+            .where(base)
+            .group_by(BotTrade.direction)
+        )
+    ).all()
+    by_direction = [_row(r[0], *r[1:]) for r in dir_rows]
+
+    # 2. By Oracle bucket — none / strong_bear / bear / neutral / bull / strong_bull
+    bucket = case(
+        (BotTrade.oracle_score_at_entry.is_(None), "none"),
+        (BotTrade.oracle_score_at_entry <= -30, "strong_bear (≤-30)"),
+        (BotTrade.oracle_score_at_entry < 0, "bear (-30..0)"),
+        (BotTrade.oracle_score_at_entry == 0, "neutral (0)"),
+        (BotTrade.oracle_score_at_entry < 30, "bull (0..30)"),
+        else_="strong_bull (≥30)",
+    )
+    oracle_rows = (
+        await db.execute(
+            select(bucket.label("bucket"), n_expr, wins_expr, losses_expr, pnl_expr, r_expr)
+            .where(base)
+            .group_by("bucket")
+        )
+    ).all()
+    by_oracle = [_row(r[0], *r[1:]) for r in oracle_rows]
+
+    # 3. By symbol (top by traffic, with PnL/R)
+    sym_rows = (
+        await db.execute(
+            select(BotTrade.symbol, n_expr, wins_expr, losses_expr, pnl_expr, r_expr)
+            .where(base)
+            .group_by(BotTrade.symbol)
+            .order_by(desc(n_expr))
+            .limit(50)
+        )
+    ).all()
+    by_symbol = [_row(r[0], *r[1:]) for r in sym_rows]
+
+    # 4. By hour-of-day (UTC) — when does the bot trade well?
+    hour = func.date_part("hour", BotTrade.alert_detected_at).label("hour")
+    hour_rows = (
+        await db.execute(
+            select(hour, n_expr, wins_expr, losses_expr, pnl_expr, r_expr)
+            .where(base)
+            .group_by("hour")
+            .order_by("hour")
+        )
+    ).all()
+    by_hour = [_row(int(r[0]) if r[0] is not None else None, *r[1:]) for r in hour_rows]
+
+    return {
+        "days": days,
+        "by_direction": by_direction,
+        "by_oracle_bucket": by_oracle,
+        "by_symbol": by_symbol,
+        "by_hour_utc": by_hour,
     }
 
 
