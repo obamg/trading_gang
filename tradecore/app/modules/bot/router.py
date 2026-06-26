@@ -20,7 +20,7 @@ from sqlalchemy import and_, case, desc, func, select
 from app.config import settings as app_settings
 from app.dependencies import CurrentUser, DBSession
 from app.models.bot import BotSkippedSignal, BotTrade
-from app.modules.bot import candle_source, equity, executor
+from app.modules.bot import candle_source, equity, executor, vetoes
 from app.modules.bot.schemas import CloseReason
 
 router = APIRouter(prefix="/bot", tags=["bot"])
@@ -50,6 +50,9 @@ async def status(_user: CurrentUser):
             "max_hold_hours": int(app_settings.bot_max_hold_hours),
             "fee_pct_per_side": float(app_settings.bot_fee_pct_per_side),
             "slippage_pct": float(app_settings.bot_slippage_pct),
+            "perp_only": bool(app_settings.bot_perp_only),
+            "symbol_blocklist": sorted(vetoes.blocklist()),
+            "min_turnover_usd": float(app_settings.bot_min_turnover_usd),
             "daily_drawdown_cap_pct": float(app_settings.bot_daily_drawdown_cap_pct),
             "oracle_veto_long_below": float(app_settings.bot_oracle_veto_long_below),
             "oracle_veto_short_above": float(app_settings.bot_oracle_veto_short_above),

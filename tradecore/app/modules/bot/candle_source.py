@@ -76,6 +76,33 @@ async def get_recent_candles(
     return []
 
 
+def turnover_from_candles(candles: list[dict]) -> float:
+    """Sum quote-volume (USD turnover) across candles. Prefers the bar's quote
+    field (``q``); falls back to base-volume × close when it's absent (Binance
+    klines, which we map without quote volume)."""
+    total = 0.0
+    for c in candles:
+        q = c.get("q")
+        if q is not None:
+            total += float(q)
+        else:
+            v = float(c.get("v") or c.get("volume") or 0)
+            close = float(c.get("c") or c.get("close") or 0)
+            total += v * close
+    return total
+
+
+async def recent_turnover_usd(
+    symbol: str,
+    exchange: str,
+    market_type: str | None,
+    bars: int = 12,
+) -> float:
+    """Rolling USD turnover over the last ``bars`` candles — a liquidity proxy."""
+    candles = await get_recent_candles(symbol, exchange, market_type, limit=bars)
+    return turnover_from_candles(candles)
+
+
 async def get_latest_candle(
     symbol: str,
     exchange: str,

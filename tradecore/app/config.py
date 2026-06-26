@@ -165,6 +165,11 @@ class Settings(BaseSettings):
                                                  # (frees orphans whose candle stream went stale). 0 disables.
     bot_fee_pct_per_side: float = 0.0006         # taker fee per side (Bybit ~0.06%); charged on entry+exit
     bot_slippage_pct: float = 0.0005             # adverse slippage on market exits (stop/manual/timeout)
+    # Asset selection — code defaults OFF (no behaviour change); the active prod
+    # policy is set via compose env. See bot/vetoes.py.
+    bot_perp_only: bool = False                  # skip non-perp (spot) signals — spot can't be shorted live
+    bot_symbol_blocklist: str = ""               # comma-separated symbols to never trade (case-insensitive)
+    bot_min_turnover_usd: float = 0.0            # skip if recent rolling turnover < this (0 disables). Needs calibration.
     bot_daily_drawdown_cap_pct: float = 0.05     # kill switch at -5% from daily anchor
     bot_oracle_veto_long_below: float = -30.0    # skip longs when oracle is bearish
     bot_oracle_veto_short_above: float = 30.0    # skip shorts when oracle is bullish

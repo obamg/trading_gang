@@ -100,6 +100,7 @@ class BotListener:
                 symbol=symbol,
                 base_asset=base_asset,
                 exchange=exchange,
+                market_type=market_type,
                 direction=direction,
             )
             if skip_reason is not None:

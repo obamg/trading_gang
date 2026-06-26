@@ -280,6 +280,63 @@ class TestExchangeSupport:
         assert vetoes.supports_exchange("") is False
 
 
+# ---------- asset selection filters ----------
+
+
+class TestPerpOnly:
+    def test_off_allows_everything(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_perp_only", False)
+        assert vetoes.market_allowed("spot") is True
+        assert vetoes.market_allowed(None) is True
+        assert vetoes.market_allowed("perp") is True
+
+    def test_on_allows_only_perp(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_perp_only", True)
+        assert vetoes.market_allowed("perp") is True
+        assert vetoes.market_allowed("spot") is False
+        assert vetoes.market_allowed(None) is False  # unknown treated as non-perp
+
+
+class TestSymbolBlocklist:
+    def test_parsing_is_case_insensitive_and_trimmed(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_symbol_blocklist", "ESUSDT, esportsusdt , SIRENUSDT")
+        assert vetoes.blocklist() == {"ESUSDT", "ESPORTSUSDT", "SIRENUSDT"}
+        assert vetoes.is_blocked("esusdt") is True
+        assert vetoes.is_blocked("ESPORTSUSDT") is True
+        assert vetoes.is_blocked("BTCUSDT") is False
+
+    def test_empty_blocklist_blocks_nothing(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_symbol_blocklist", "")
+        assert vetoes.blocklist() == set()
+        assert vetoes.is_blocked("ESUSDT") is False
+
+
+class TestTurnover:
+    def test_prefers_quote_volume_field(self):
+        from app.modules.bot import candle_source
+
+        candles = [{"q": 100.0}, {"q": 250.5}]
+        assert candle_source.turnover_from_candles(candles) == 350.5
+
+    def test_falls_back_to_volume_times_close(self):
+        from app.modules.bot import candle_source
+
+        candles = [{"v": 10, "c": 2.0}, {"v": 5, "c": 4.0}]  # 20 + 20
+        assert candle_source.turnover_from_candles(candles) == 40.0
+
+
 # ---------- risk-normalized sizing ----------
 
 

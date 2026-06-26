@@ -24,6 +24,9 @@ class SkipReason(str, Enum):
     NO_EQUITY = "no_equity"
     INVALID_DIRECTION = "invalid_direction"
     EXCHANGE_UNSUPPORTED = "exchange_unsupported"
+    NOT_PERP = "not_perp"
+    SYMBOL_BLOCKED = "symbol_blocked"
+    LOW_TURNOVER = "low_turnover"
 
 
 class CloseReason(str, Enum):
