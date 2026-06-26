@@ -278,3 +278,120 @@ class TestExchangeSupport:
 
         assert vetoes.supports_exchange("okx") is False
         assert vetoes.supports_exchange("") is False
+
+
+# ---------- risk-normalized sizing ----------
+
+
+class TestComputeNotional:
+    def test_falls_back_to_cap_when_risk_pct_none(self):
+        n = strategy.compute_notional(
+            paper_equity=Decimal("10000"), entry_price=Decimal("100"),
+            stop_price=Decimal("95"), max_notional_pct=Decimal("0.05"),
+            risk_per_trade_pct=None,
+        )
+        assert n == Decimal("500")  # 5% × 10000 (legacy fixed-notional behaviour)
+
+    def test_falls_back_to_cap_when_risk_pct_zero(self):
+        n = strategy.compute_notional(
+            paper_equity=Decimal("10000"), entry_price=Decimal("100"),
+            stop_price=Decimal("95"), max_notional_pct=Decimal("0.05"),
+            risk_per_trade_pct=Decimal("0"),
+        )
+        assert n == Decimal("500")
+
+    def test_risk_normalized_below_cap(self):
+        # stop 10% away; risk 0.25% of 10k = $25 → notional 25/0.10 = $250 (< $500 cap)
+        n = strategy.compute_notional(
+            paper_equity=Decimal("10000"), entry_price=Decimal("100"),
+            stop_price=Decimal("90"), max_notional_pct=Decimal("0.05"),
+            risk_per_trade_pct=Decimal("0.0025"),
+        )
+        assert n == Decimal("250")
+
+    def test_cap_binds_for_tight_stop(self):
+        # stop 1% away → would need $2500 notional for $25 risk; cap holds it at $500
+        n = strategy.compute_notional(
+            paper_equity=Decimal("10000"), entry_price=Decimal("100"),
+            stop_price=Decimal("99"), max_notional_pct=Decimal("0.05"),
+            risk_per_trade_pct=Decimal("0.0025"),
+        )
+        assert n == Decimal("500")
+
+    def test_dollar_risk_constant_across_stop_widths(self):
+        # The whole fix: $-risk at the stop is constant regardless of stop width
+        # (until the cap binds). Cap set high so it never binds here.
+        for stop in (Decimal("90"), Decimal("80"), Decimal("75")):
+            n = strategy.compute_notional(
+                paper_equity=Decimal("10000"), entry_price=Decimal("100"),
+                stop_price=stop, max_notional_pct=Decimal("0.50"),
+                risk_per_trade_pct=Decimal("0.0025"),
+            )
+            stop_dist = (Decimal("100") - stop) / Decimal("100")
+            assert abs(n * stop_dist - Decimal("25")) < Decimal("0.0001")
+
+
+class TestPlanEntryRiskSizing:
+    def _alert(self, direction="short_squeeze") -> dict:
+        return {
+            "type": "wave_active", "symbol": "BTCUSDT", "exchange": "bybit",
+            "base_asset": "BTC", "direction": direction,
+            "detected_at": datetime(2026, 6, 9, 11, 30, tzinfo=timezone.utc).isoformat(),
+        }
+
+    def test_wide_stop_shrinks_notional_and_fixes_dollar_risk(self):
+        # Wide signal candle (l=80) → wide stop → notional well below the $500 cap,
+        # with dollar-risk pinned to ~$25.
+        plan = strategy.plan_entry(
+            alert=self._alert("short_squeeze"),
+            signal_candle=_candle(h=105, l=80, c=104),
+            entry_price=Decimal("104"),
+            paper_equity=Decimal("10000"),
+            position_size_pct=Decimal("0.05"),
+            stop_buffer_pct=Decimal("0.0005"),
+            r_multiple=Decimal("2"),
+            risk_per_trade_pct=Decimal("0.0025"),
+        )
+        assert plan is not None
+        assert plan.notional_usd < Decimal("500")
+        stop_dist = abs(Decimal("104") - plan.stop_price) / Decimal("104")
+        assert abs(plan.notional_usd * stop_dist - Decimal("25")) < Decimal("0.01")
+
+    def test_default_still_fixed_notional(self):
+        # No risk_per_trade_pct → unchanged legacy sizing at the cap.
+        plan = strategy.plan_entry(
+            alert=self._alert("short_squeeze"),
+            signal_candle=_candle(h=105, l=100, c=104),
+            entry_price=Decimal("104"),
+            paper_equity=Decimal("10000"),
+            position_size_pct=Decimal("0.05"),
+            stop_buffer_pct=Decimal("0.0005"),
+            r_multiple=Decimal("2"),
+        )
+        assert plan is not None
+        assert plan.notional_usd == Decimal("500")
+
+
+# ---------- exit costs: slippage + fees ----------
+
+
+class TestSlippage:
+    def test_long_exit_slips_down(self):
+        p = strategy.adverse_slippage_price(Direction.LONG, Decimal("100"), Decimal("0.0005"))
+        assert p == Decimal("100") * Decimal("0.9995")
+
+    def test_short_exit_slips_up(self):
+        p = strategy.adverse_slippage_price(Direction.SHORT, Decimal("100"), Decimal("0.0005"))
+        assert p == Decimal("100") * Decimal("1.0005")
+
+    def test_zero_slippage_is_noop(self):
+        assert strategy.adverse_slippage_price(Direction.LONG, Decimal("100"), Decimal("0")) == Decimal("100")
+
+
+class TestFees:
+    def test_round_trip_charges_both_legs(self):
+        f = strategy.round_trip_fee(Decimal("500"), Decimal("520"), Decimal("0.0006"))
+        assert f == Decimal("1020") * Decimal("0.0006")
+
+    def test_zero_fee_is_zero(self):
+        assert strategy.round_trip_fee(Decimal("500"), Decimal("520"), Decimal("0")) == Decimal("0")

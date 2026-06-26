@@ -1,10 +1,15 @@
 """Exchange-aware candle fetcher for the bot.
 
 Bybit symbols are served from the in-process WS stream (``candles:{symbol}``
-Redis list). Binance symbols are polled via the public REST klines API on
-demand — the bot opens at most ``bot_max_concurrent`` Binance trades at a time
-and the monitor ticks at ``bot_monitor_tick_seconds``, so request volume is
+Redis list, **5m** bars). Binance symbols are polled via the public REST klines
+API on demand — the bot opens at most ``bot_max_concurrent`` Binance trades at a
+time and the monitor ticks at ``bot_monitor_tick_seconds``, so request volume is
 negligible vs Binance's per-IP weight budget.
+
+Both exchanges use the **same 5m timeframe** so a signal produces the same stop
+width, entry confirmation, and monitor granularity regardless of venue. (This
+was previously 1m for Binance, which made Binance stops ~5× tighter than Bybit
+for identical signals — effectively two different strategies.)
 """
 from __future__ import annotations
 
@@ -17,11 +22,14 @@ from app.services import redis_service
 BINANCE_PERP_BASE = "https://fapi.binance.com/fapi/v1"
 BINANCE_SPOT_BASE = "https://api.binance.com/api/v3"
 _TIMEOUT_S = 5.0
+# Match the Bybit WS stream (kline.5 → candles:{symbol}) so the strategy behaves
+# identically across exchanges.
+_INTERVAL = "5m"
 
 
 def _binance_url(symbol: str, market_type: str | None, limit: int) -> str:
     base = BINANCE_PERP_BASE if (market_type or "perp").lower() == "perp" else BINANCE_SPOT_BASE
-    return f"{base}/klines?symbol={symbol}&interval=1m&limit={max(1, limit)}"
+    return f"{base}/klines?symbol={symbol}&interval={_INTERVAL}&limit={max(1, limit)}"
 
 
 def _parse_binance_kline(row: list) -> dict:

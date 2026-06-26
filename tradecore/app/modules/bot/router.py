@@ -43,9 +43,13 @@ async def status(_user: CurrentUser):
         "max_concurrent": int(app_settings.bot_max_concurrent),
         "config": {
             "position_size_pct": float(app_settings.bot_position_size_pct),
+            "risk_per_trade_pct": float(app_settings.bot_risk_per_trade_pct),
             "r_multiple": float(app_settings.bot_take_profit_r_multiple),
             "stop_buffer_pct": float(app_settings.bot_stop_buffer_pct),
             "per_symbol_cooldown_minutes": int(app_settings.bot_per_symbol_cooldown_minutes),
+            "max_hold_hours": int(app_settings.bot_max_hold_hours),
+            "fee_pct_per_side": float(app_settings.bot_fee_pct_per_side),
+            "slippage_pct": float(app_settings.bot_slippage_pct),
             "daily_drawdown_cap_pct": float(app_settings.bot_daily_drawdown_cap_pct),
             "oracle_veto_long_below": float(app_settings.bot_oracle_veto_long_below),
             "oracle_veto_short_above": float(app_settings.bot_oracle_veto_short_above),

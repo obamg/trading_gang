@@ -168,6 +168,7 @@ class BotListener:
                 position_size_pct=Decimal(str(app_settings.bot_position_size_pct)),
                 stop_buffer_pct=Decimal(str(app_settings.bot_stop_buffer_pct)),
                 r_multiple=Decimal(str(app_settings.bot_take_profit_r_multiple)),
+                risk_per_trade_pct=Decimal(str(app_settings.bot_risk_per_trade_pct)),
                 oracle_score=Decimal(str(oracle_score)) if oracle_score is not None else None,
             )
             if plan is None:

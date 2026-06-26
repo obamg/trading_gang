@@ -11,11 +11,15 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings as app_settings
 from app.logging_config import log
 from app.models.bot import BotSkippedSignal, BotTrade
 from app.modules.bot import equity, strategy
 from app.modules.bot.schemas import CloseReason, Direction, SkipReason, TradePlan
 from app.services import redis_service
+
+# Market-style exits slip; a TP is a resting limit and fills at its price.
+_MARKET_EXITS = {CloseReason.STOP, CloseReason.MANUAL, CloseReason.KILL_SWITCH, CloseReason.MAX_HOLD}
 
 OPEN_HASH_KEY = "bot:open:{symbol}"
 
@@ -96,15 +100,31 @@ async def close_paper_trade(
     exit_price: Decimal,
     reason: CloseReason,
 ) -> BotTrade:
-    """Mark a trade closed, apply PnL to equity, set cooldown, emit alert."""
+    """Mark a trade closed, apply net PnL (after slippage + fees) to equity,
+    set cooldown, emit alert."""
     direction = Direction(trade.direction)
-    pnl = strategy.realized_pnl(direction, trade.entry_price, exit_price, trade.qty)
+
+    # Market exits (stop/manual/timeout) slip against us; TPs fill at the limit.
+    slippage_pct = Decimal(str(app_settings.bot_slippage_pct))
+    fill_price = (
+        strategy.adverse_slippage_price(direction, exit_price, slippage_pct)
+        if reason in _MARKET_EXITS
+        else exit_price
+    )
+
+    gross_pnl = strategy.realized_pnl(direction, trade.entry_price, fill_price, trade.qty)
+    fees = strategy.round_trip_fee(
+        trade.entry_price * trade.qty,
+        fill_price * trade.qty,
+        Decimal(str(app_settings.bot_fee_pct_per_side)),
+    )
+    pnl = gross_pnl - fees
     r_multiple = strategy.realized_r_multiple(
-        direction, trade.entry_price, trade.stop_price, exit_price
+        direction, trade.entry_price, trade.stop_price, fill_price
     )
     now = datetime.now(timezone.utc)
 
-    trade.close_price = exit_price
+    trade.close_price = fill_price
     trade.closed_at = now
     trade.close_reason = reason.value
     trade.realized_pnl_usd = pnl
@@ -130,10 +150,11 @@ async def close_paper_trade(
             "exchange": trade.exchange,
             "direction": trade.direction,
             "entry_price": float(trade.entry_price),
-            "close_price": float(exit_price),
+            "close_price": float(fill_price),
             "close_reason": reason.value,
             "realized_pnl_usd": float(pnl),
             "realized_r": float(r_multiple),
+            "fees_usd": float(fees),
             "closed_at": now.isoformat(),
         },
     )
@@ -143,6 +164,8 @@ async def close_paper_trade(
         symbol=trade.symbol,
         reason=reason.value,
         pnl=float(pnl),
+        gross_pnl=float(gross_pnl),
+        fees=float(fees),
         r=float(r_multiple),
     )
     return trade

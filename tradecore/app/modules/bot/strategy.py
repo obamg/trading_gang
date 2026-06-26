@@ -68,6 +68,36 @@ def compute_qty(notional_usd: Decimal, entry_price: Decimal) -> Decimal:
     return notional_usd / entry_price
 
 
+def compute_notional(
+    *,
+    paper_equity: Decimal,
+    entry_price: Decimal,
+    stop_price: Decimal,
+    max_notional_pct: Decimal,
+    risk_per_trade_pct: Decimal | None,
+) -> Decimal:
+    """Position notional in USD.
+
+    Risk-normalized: notional is sized so the distance to the stop costs
+    ``paper_equity × risk_per_trade_pct`` if hit, capped at
+    ``paper_equity × max_notional_pct``. This decouples dollar-risk from the
+    signal-candle width — without it, a wide stop carries far more dollar risk
+    than a tight one for the same notional, which made the bot net-positive in R
+    yet net-negative in dollars.
+
+    Falls back to fixed-notional (the cap) when ``risk_per_trade_pct`` is None/≤0
+    or the stop distance is degenerate.
+    """
+    cap = paper_equity * max_notional_pct
+    if risk_per_trade_pct is None or risk_per_trade_pct <= 0 or entry_price <= 0:
+        return cap
+    stop_dist_frac = abs(entry_price - stop_price) / entry_price
+    if stop_dist_frac <= 0:
+        return cap
+    risk_usd = paper_equity * risk_per_trade_pct
+    return min(risk_usd / stop_dist_frac, cap)
+
+
 def is_stop_hit(direction: Direction, bar_high: Decimal, bar_low: Decimal, stop: Decimal) -> bool:
     if direction == Direction.LONG:
         return bar_low <= stop
@@ -83,6 +113,27 @@ def is_tp_hit(direction: Direction, bar_high: Decimal, bar_low: Decimal, tp: Dec
 def realized_pnl(direction: Direction, entry: Decimal, exit_price: Decimal, qty: Decimal) -> Decimal:
     delta = (exit_price - entry) if direction == Direction.LONG else (entry - exit_price)
     return delta * qty
+
+
+def adverse_slippage_price(
+    direction: Direction, price: Decimal, slippage_pct: Decimal
+) -> Decimal:
+    """Worsen a market-exit fill by ``slippage_pct`` — sell lower for longs, buy
+    higher for shorts. Used for stop/manual/timeout exits (not limit TPs)."""
+    if slippage_pct <= 0:
+        return price
+    if direction == Direction.LONG:
+        return price * (Decimal("1") - slippage_pct)
+    return price * (Decimal("1") + slippage_pct)
+
+
+def round_trip_fee(
+    entry_notional: Decimal, exit_notional: Decimal, fee_pct_per_side: Decimal
+) -> Decimal:
+    """Taker fee charged on both the entry and the exit leg."""
+    if fee_pct_per_side <= 0:
+        return Decimal("0")
+    return (abs(entry_notional) + abs(exit_notional)) * fee_pct_per_side
 
 
 def realized_r_multiple(
@@ -108,12 +159,16 @@ def plan_entry(
     position_size_pct: Decimal,
     stop_buffer_pct: Decimal,
     r_multiple: Decimal,
+    risk_per_trade_pct: Decimal | None = None,
     oracle_score: Decimal | None = None,
 ) -> TradePlan | None:
     """Build a TradePlan or return None if the inputs don't validate.
 
     Returns None for: unknown direction, non-positive equity, broken candle,
     non-positive entry, stop equal to or beyond entry (would invert R sign).
+
+    ``position_size_pct`` is the notional cap; ``risk_per_trade_pct`` (when set)
+    drives risk-normalized sizing within that cap — see ``compute_notional``.
     """
     direction = map_direction(alert.get("direction", ""))
     if direction is None or paper_equity <= 0 or entry_price <= 0:
@@ -131,7 +186,13 @@ def plan_entry(
         return None
 
     take_profit = compute_take_profit(direction, entry_price, stop_price, r_multiple)
-    notional = paper_equity * position_size_pct
+    notional = compute_notional(
+        paper_equity=paper_equity,
+        entry_price=entry_price,
+        stop_price=stop_price,
+        max_notional_pct=position_size_pct,
+        risk_per_trade_pct=risk_per_trade_pct,
+    )
 
     return TradePlan(
         symbol=alert["symbol"],

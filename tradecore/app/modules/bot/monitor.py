@@ -54,12 +54,30 @@ def _decide_close(trade: BotTrade, bar: dict) -> tuple[CloseReason, Decimal] | N
     return None
 
 
+async def _max_hold_fill(trade: BotTrade) -> Decimal:
+    """Best-available exit price for a timed-out position. Uses the latest candle
+    close; falls back to entry price when the symbol's stream has gone fully
+    stale (truly orphaned) so the slot is still freed."""
+    candle = await candle_source.get_latest_candle(
+        trade.symbol, trade.exchange, trade.market_type
+    )
+    if candle is not None:
+        px = Decimal(str(candle.get("c") or candle.get("close") or 0))
+        if px > 0:
+            return px
+    return Decimal(str(trade.entry_price))
+
+
 async def run_monitor_tick() -> dict:
-    """Scheduler entry. Walks open trades, closes any whose stop/TP hit."""
+    """Scheduler entry. Walks open trades, closes any whose stop/TP hit, and
+    force-closes any held longer than ``bot_max_hold_hours`` (orphan cleanup)."""
     if not getattr(app_settings, "bot_enabled", False):
         return {"skipped": "disabled"}
 
+    max_hold_hours = int(getattr(app_settings, "bot_max_hold_hours", 0) or 0)
+    now = datetime.now(timezone.utc)
     closed = 0
+    expired = 0
     checked = 0
     async with AsyncSessionLocal() as db:
         rows = (
@@ -68,11 +86,9 @@ async def run_monitor_tick() -> dict:
         for trade in rows:
             checked += 1
             try:
-                bars = await _bars_to_check(trade)
-                if not bars:
-                    continue
+                closed_this = False
                 # Iterate oldest first for deterministic close order.
-                for bar in reversed(bars):
+                for bar in reversed(await _bars_to_check(trade)):
                     decision = _decide_close(trade, bar)
                     if decision is None:
                         continue
@@ -81,7 +97,21 @@ async def run_monitor_tick() -> dict:
                         db, trade, exit_price=fill, reason=reason
                     )
                     closed += 1
+                    closed_this = True
                     break
+                if closed_this:
+                    continue
+                # Max-hold: positions that never touched stop/TP (often because the
+                # symbol left the WS sub and candles went stale) are force-closed.
+                if max_hold_hours > 0:
+                    age_hours = (now - trade.entry_at).total_seconds() / 3600.0
+                    if age_hours >= max_hold_hours:
+                        fill = await _max_hold_fill(trade)
+                        await executor.close_paper_trade(
+                            db, trade, exit_price=fill, reason=CloseReason.MAX_HOLD
+                        )
+                        closed += 1
+                        expired += 1
             except Exception as e:
                 log.warning(
                     "bot_monitor_one_failed",
@@ -89,8 +119,8 @@ async def run_monitor_tick() -> dict:
                     symbol=trade.symbol,
                     err=str(e),
                 )
-    log.info("bot_monitor_tick", checked=checked, closed=closed)
-    return {"checked": checked, "closed": closed}
+    log.info("bot_monitor_tick", checked=checked, closed=closed, expired=expired)
+    return {"checked": checked, "closed": closed, "expired": expired}
 
 
 async def run_daily_anchor_reset() -> dict:

@@ -153,16 +153,23 @@ class Settings(BaseSettings):
     # trust the veto behaviour. v1 is paper-only — no order routing.
     bot_enabled: bool = False
     bot_paper_equity_initial: float = 10_000.0
-    bot_position_size_pct: float = 0.05          # 5% notional per trade
+    bot_position_size_pct: float = 0.05          # hard cap on notional per trade (5% of equity)
+    bot_risk_per_trade_pct: float = 0.0025       # risk-normalized sizing: 0.25% equity at risk per
+                                                 # trade. notional = min(risk/stop_dist, cap above).
+                                                 # 0 → fall back to fixed-notional (cap) sizing.
     bot_max_concurrent: int = 5                  # → 25% max exposure at full
     bot_take_profit_r_multiple: float = 2.0      # TP at 2R, simple to evaluate
     bot_stop_buffer_pct: float = 0.0005          # 0.05% past the candle extreme
     bot_per_symbol_cooldown_minutes: int = 120   # no re-entry for 2h after close
+    bot_max_hold_hours: int = 24                 # force-close positions open longer than this
+                                                 # (frees orphans whose candle stream went stale). 0 disables.
+    bot_fee_pct_per_side: float = 0.0006         # taker fee per side (Bybit ~0.06%); charged on entry+exit
+    bot_slippage_pct: float = 0.0005             # adverse slippage on market exits (stop/manual/timeout)
     bot_daily_drawdown_cap_pct: float = 0.05     # kill switch at -5% from daily anchor
     bot_oracle_veto_long_below: float = -30.0    # skip longs when oracle is bearish
     bot_oracle_veto_short_above: float = 30.0    # skip shorts when oracle is bullish
     bot_news_veto_window_minutes: int = 30       # skip if high-impact news in last N min
-    bot_entry_delay_seconds: int = 60            # wait one 1m bar before filling
+    bot_entry_delay_seconds: int = 60            # settle delay before pulling the entry fill
     bot_monitor_tick_seconds: int = 30           # how often to check open positions for stop/TP
     bot_live_enabled: bool = False               # v2: when true, route fills to a real exchange
     bot_live_leverage: int = 5                   # v2: isolated leverage on Bybit perps

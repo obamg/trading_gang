@@ -31,6 +31,7 @@ class CloseReason(str, Enum):
     TP = "tp"
     MANUAL = "manual"
     KILL_SWITCH = "kill_switch"
+    MAX_HOLD = "max_hold"
 
 
 @dataclass(frozen=True)
