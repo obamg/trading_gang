@@ -366,6 +366,24 @@ class TelegramService:
                 parts.append(" | ".join(details))
             return "".join(parts)
 
+        if module == "walletwatch":
+            token = d.get("token_out_symbol") or _short_addr(d.get("token_out_address"))
+            entity = d.get("entity_name") or _short_addr(d.get("wallet"))
+            chain = (d.get("chain") or "?").lower()
+            venue = d.get("venue") or "DEX"
+            paid = d.get("token_in_symbol") or "?"
+            conv = d.get("entity_conviction")
+            try:
+                conv_str = f"{float(conv):.2f}" if conv is not None else "—"
+            except (TypeError, ValueError):
+                conv_str = "?"
+            return (
+                f"🧠 *Smart Money Buy — {token}*\n"
+                f"{entity} bought `{token}` on `{venue}`\n"
+                f"Size: `${_fmt_usd(d.get('amount_usd'))}` (paid in `{paid}`)\n"
+                f"Chain: `{chain}` | Conviction: `{conv_str}`"
+            )
+
         if module == "wavewatch":
             base = d.get("base_asset") or sym
             mkt = (d.get("market_type") or "?").upper()
@@ -416,6 +434,13 @@ def _fmt_pct(v) -> str:
         return f"{float(v):+.2f}%"
     except (TypeError, ValueError):
         return "?"
+
+
+def _short_addr(v) -> str:
+    if not v:
+        return "?"
+    s = str(v)
+    return f"{s[:6]}…{s[-4:]}" if len(s) > 12 else s
 
 
 service = TelegramService()
