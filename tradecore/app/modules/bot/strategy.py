@@ -136,6 +136,46 @@ def round_trip_fee(
     return (abs(entry_notional) + abs(exit_notional)) * fee_pct_per_side
 
 
+def estimated_funding_pnl(
+    direction: Direction,
+    entry_notional: Decimal,
+    funding_pct: Decimal | None,
+    hold_hours: float,
+    interval_hours: float,
+) -> Decimal:
+    """Estimated funding transfer over the hold, at the entry-time rate.
+
+    Perp funding: longs pay shorts when the rate is positive, and vice versa.
+    Holds the entry rate constant across intervals — an estimate; cascade-driven
+    extremes mean-revert, so long holds overstate the transfer.
+    """
+    if funding_pct is None or interval_hours <= 0 or entry_notional <= 0:
+        return Decimal("0")
+    intervals = int(hold_hours / interval_hours)
+    if intervals <= 0:
+        return Decimal("0")
+    transfer = funding_pct * entry_notional * intervals
+    return -transfer if direction == Direction.LONG else transfer
+
+
+def net_r_multiple(
+    net_pnl_usd: Decimal,
+    entry: Decimal,
+    stop: Decimal,
+    qty: Decimal,
+) -> Decimal:
+    """R net of all costs: net PnL over the dollar-risk at entry.
+
+    ``realized_r_multiple`` is price-move only, so it overstates the edge by
+    the cost load (~0.05R at typical stop widths) — comparable to the whole
+    measured expectancy. Scale-up decisions should read this one.
+    """
+    risk_usd = abs(entry - stop) * qty
+    if risk_usd == 0:
+        return Decimal("0")
+    return net_pnl_usd / risk_usd
+
+
 def realized_r_multiple(
     direction: Direction,
     entry: Decimal,

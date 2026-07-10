@@ -119,6 +119,21 @@ async def get_concurrent_count() -> int:
         return 0
 
 
+async def reconcile_concurrent(actual_open: int) -> int:
+    """Overwrite the counter with DB truth (count of open bot_trades rows).
+
+    The incr/decr pair can drift if a process dies between the DB commit and
+    the counter update; a stuck-high counter blocks entries forever. Called
+    every monitor tick. Returns the drift (redis − actual) for logging.
+    """
+    current = await get_concurrent_count()
+    drift = current - actual_open
+    if drift != 0:
+        r = redis_service.get_redis()
+        await r.set(CONCURRENT_KEY, str(max(0, actual_open)))
+    return drift
+
+
 async def increment_concurrent() -> int:
     r = redis_service.get_redis()
     return int(await r.incr(CONCURRENT_KEY))

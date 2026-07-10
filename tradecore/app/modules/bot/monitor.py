@@ -13,13 +13,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import settings as app_settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.bot import BotTrade
-from app.modules.bot import candle_source, executor, strategy
+from app.modules.bot import candle_source, equity, executor, strategy
 from app.modules.bot.schemas import CloseReason, Direction
 
 
@@ -119,6 +119,16 @@ async def run_monitor_tick() -> dict:
                     symbol=trade.symbol,
                     err=str(e),
                 )
+        # Reconcile the Redis concurrency counter against DB truth — a fresh
+        # count, since the listener may have opened trades during this tick.
+        open_now = (
+            await db.execute(
+                select(func.count()).select_from(BotTrade).where(BotTrade.status == "open")
+            )
+        ).scalar_one()
+    drift = await equity.reconcile_concurrent(int(open_now))
+    if drift != 0:
+        log.warning("bot_concurrent_reconciled", drift=drift, actual=int(open_now))
     log.info("bot_monitor_tick", checked=checked, closed=closed, expired=expired)
     return {"checked": checked, "closed": closed, "expired": expired}
 

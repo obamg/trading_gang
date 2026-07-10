@@ -6,6 +6,7 @@ Key naming conventions (other teams depend on these EXACTLY):
   symbols:active              set of active symbol strings
   funding:{symbol}            float, TTL 3600s
   oi:{symbol}                 hash {oi_usd, oi_contracts}, TTL 300s
+  bookticker:{symbol}         hash {b: best_bid, a: best_ask}, TTL 60s
   liq_heatmap:{symbol}        hash {price_bucket: usd_size}
   cooldown:{module}:{symbol}  key with TTL (exists = on cooldown)
   session:{token_hash}        user_id, TTL = session ttl
@@ -144,6 +145,21 @@ async def get_funding_rate(symbol: str) -> float | None:
     r = get_redis()
     v = await r.get(f"funding:{symbol}")
     return float(v) if v is not None else None
+
+
+# ---------- book ticker (best bid/ask) ----------
+
+async def get_bookticker(symbol: str) -> tuple[float, float] | None:
+    """Best (bid, ask) from ``bookticker:{symbol}`` — written by the exchange
+    stream's orderbook.1 consumer, 60s TTL. None when absent or malformed."""
+    r = get_redis()
+    data = await r.hgetall(f"bookticker:{symbol}")
+    if not data:
+        return None
+    try:
+        return float(data["b"]), float(data["a"])
+    except (KeyError, ValueError, TypeError):
+        return None
 
 
 # ---------- open interest ----------

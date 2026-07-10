@@ -50,6 +50,9 @@ async def status(_user: CurrentUser):
             "max_hold_hours": int(app_settings.bot_max_hold_hours),
             "fee_pct_per_side": float(app_settings.bot_fee_pct_per_side),
             "slippage_pct": float(app_settings.bot_slippage_pct),
+            "funding_interval_hours": float(app_settings.bot_funding_interval_hours),
+            "long_enabled": bool(app_settings.bot_long_enabled),
+            "short_enabled": bool(app_settings.bot_short_enabled),
             "perp_only": bool(app_settings.bot_perp_only),
             "symbol_blocklist": sorted(vetoes.blocklist()),
             "min_turnover_usd": float(app_settings.bot_min_turnover_usd),
@@ -173,9 +176,12 @@ async def analytics(_user: CurrentUser, db: DBSession, days: int = Query(default
     losses_expr = func.sum(case((BotTrade.close_reason == "stop", 1), else_=0))
     pnl_expr = func.coalesce(func.sum(BotTrade.realized_pnl_usd), 0)
     r_expr = func.coalesce(func.sum(BotTrade.realized_r), 0)
+    # Net R is null on trades closed before the instrumentation deploy; the sum
+    # treats them as 0, so read net expectancy only over post-deploy windows.
+    r_net_expr = func.coalesce(func.sum(BotTrade.realized_r_net), 0)
     n_expr = func.count()
 
-    def _row(label, n, wins, losses, pnl, r_sum):
+    def _row(label, n, wins, losses, pnl, r_sum, r_net_sum):
         n_i = int(n or 0)
         wins_i = int(wins or 0)
         losses_i = int(losses or 0)
@@ -188,13 +194,15 @@ async def analytics(_user: CurrentUser, db: DBSession, days: int = Query(default
             "win_rate": (wins_i / decided) if decided else None,
             "realized_pnl_usd": float(pnl or 0),
             "realized_r": float(r_sum or 0),
+            "realized_r_net": float(r_net_sum or 0),
             "expectancy_r": (float(r_sum or 0) / n_i) if n_i else None,
+            "expectancy_r_net": (float(r_net_sum or 0) / n_i) if n_i else None,
         }
 
     # 1. By direction
     dir_rows = (
         await db.execute(
-            select(BotTrade.direction, n_expr, wins_expr, losses_expr, pnl_expr, r_expr)
+            select(BotTrade.direction, n_expr, wins_expr, losses_expr, pnl_expr, r_expr, r_net_expr)
             .where(base)
             .group_by(BotTrade.direction)
         )
@@ -212,7 +220,7 @@ async def analytics(_user: CurrentUser, db: DBSession, days: int = Query(default
     )
     oracle_rows = (
         await db.execute(
-            select(bucket.label("bucket"), n_expr, wins_expr, losses_expr, pnl_expr, r_expr)
+            select(bucket.label("bucket"), n_expr, wins_expr, losses_expr, pnl_expr, r_expr, r_net_expr)
             .where(base)
             .group_by("bucket")
         )
@@ -222,7 +230,7 @@ async def analytics(_user: CurrentUser, db: DBSession, days: int = Query(default
     # 3. By symbol (top by traffic, with PnL/R)
     sym_rows = (
         await db.execute(
-            select(BotTrade.symbol, n_expr, wins_expr, losses_expr, pnl_expr, r_expr)
+            select(BotTrade.symbol, n_expr, wins_expr, losses_expr, pnl_expr, r_expr, r_net_expr)
             .where(base)
             .group_by(BotTrade.symbol)
             .order_by(desc(n_expr))
@@ -235,7 +243,7 @@ async def analytics(_user: CurrentUser, db: DBSession, days: int = Query(default
     hour = func.date_part("hour", BotTrade.alert_detected_at).label("hour")
     hour_rows = (
         await db.execute(
-            select(hour, n_expr, wins_expr, losses_expr, pnl_expr, r_expr)
+            select(hour, n_expr, wins_expr, losses_expr, pnl_expr, r_expr, r_net_expr)
             .where(base)
             .group_by("hour")
             .order_by("hour")
@@ -305,6 +313,10 @@ def _serialize_trade(t: BotTrade) -> dict:
         "close_reason": t.close_reason,
         "realized_pnl_usd": float(t.realized_pnl_usd) if t.realized_pnl_usd is not None else None,
         "realized_r": float(t.realized_r) if t.realized_r is not None else None,
+        "realized_r_net": float(t.realized_r_net) if t.realized_r_net is not None else None,
+        "fees_usd": float(t.fees_usd) if t.fees_usd is not None else None,
+        "funding_pnl_usd": float(t.funding_pnl_usd) if t.funding_pnl_usd is not None else None,
+        "entry_turnover_usd": float(t.entry_turnover_usd) if t.entry_turnover_usd is not None else None,
         "oracle_score_at_entry": float(t.oracle_score_at_entry) if t.oracle_score_at_entry is not None else None,
         "vol_ratio": float(t.vol_ratio) if t.vol_ratio is not None else None,
         "funding_pct": float(t.funding_pct) if t.funding_pct is not None else None,

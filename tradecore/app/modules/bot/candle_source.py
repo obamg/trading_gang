@@ -13,6 +13,8 @@ for identical signals — effectively two different strategies.)
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import httpx
 
 from app.logging_config import log
@@ -101,6 +103,38 @@ async def recent_turnover_usd(
     """Rolling USD turnover over the last ``bars`` candles — a liquidity proxy."""
     candles = await get_recent_candles(symbol, exchange, market_type, limit=bars)
     return turnover_from_candles(candles)
+
+
+async def get_live_price(
+    symbol: str,
+    exchange: str,
+    market_type: str | None,
+) -> Decimal | None:
+    """Best-effort live price for entry fills.
+
+    Bybit candles in Redis are CLOSED 5m bars only, so "latest close" is up to
+    5 minutes stale — on a symbol that just moved 3%+ in one bar. Use the
+    orderbook.1 mid instead (bookticker:{symbol}, 60s TTL). Binance klines
+    include the forming bar, so its latest close is already near-live.
+
+    Returns None when no live source is available; callers fall back to the
+    latest candle close.
+    """
+    ex = (exchange or "").lower()
+    if ex == "bybit":
+        top = await redis_service.get_bookticker(symbol)
+        if top is not None:
+            bid, ask = top
+            if bid > 0 and ask > 0:
+                return (Decimal(str(bid)) + Decimal(str(ask))) / 2
+        return None
+    if ex == "binance":
+        candle = await get_latest_candle(symbol, exchange, market_type)
+        if candle is not None:
+            px = Decimal(str(candle.get("c") or candle.get("close") or 0))
+            if px > 0:
+                return px
+    return None
 
 
 async def get_latest_candle(
