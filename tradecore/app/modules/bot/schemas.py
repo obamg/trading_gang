@@ -29,6 +29,9 @@ class SkipReason(str, Enum):
     LOW_TURNOVER = "low_turnover"
     DIRECTION_DISABLED = "direction_disabled"
     MAX_OPEN_RISK = "max_open_risk"
+    LOW_VOL_RATIO = "low_vol_ratio"
+    FUNDING_EXTREME = "funding_extreme"
+    BLOCKED_HOUR = "blocked_hour"
 
 
 class CloseReason(str, Enum):

@@ -48,6 +48,38 @@ def direction_enabled(direction: Direction) -> bool:
     return bool(getattr(app_settings, "bot_short_enabled", True))
 
 
+def vol_ratio_ok(vol_ratio) -> bool:
+    """Calibration: entries below ~15× burst carry the whole drawdown."""
+    gate = float(getattr(app_settings, "bot_min_vol_ratio", 0) or 0)
+    if gate <= 0 or vol_ratio is None:
+        return True
+    return float(vol_ratio) >= gate
+
+
+def funding_ok(funding_pct) -> bool:
+    """Calibration: |funding| ≥ ~0.002 inverts the squeeze thesis — those moves
+    keep running. Extreme funding is a veto here, not confirmation."""
+    cap = float(getattr(app_settings, "bot_max_abs_funding", 0) or 0)
+    if cap <= 0 or funding_pct is None:
+        return True
+    return abs(float(funding_pct)) < cap
+
+
+def blocked_hours() -> set[int]:
+    raw = getattr(app_settings, "bot_blocked_hours_utc", "") or ""
+    out: set[int] = set()
+    for s in raw.split(","):
+        s = s.strip()
+        if s.isdigit() and 0 <= int(s) <= 23:
+            out.add(int(s))
+    return out
+
+
+def hour_ok(now: datetime) -> bool:
+    hours = blocked_hours()
+    return not hours or now.hour not in hours
+
+
 def market_allowed(market_type: str | None) -> bool:
     """False when perp-only mode is on and this isn't a perp. Spot can't be
     shorted live, so its (paper-only) short edge is fiction — see asset analysis."""
@@ -140,6 +172,8 @@ async def evaluate(
     exchange: str,
     market_type: str | None,
     direction: Direction,
+    vol_ratio: float | None = None,
+    funding_pct: float | None = None,
 ) -> tuple[SkipReason | None, float | None]:
     """Run all vetoes in priority order. Returns (skip_reason_or_none, oracle_score).
 
@@ -157,6 +191,12 @@ async def evaluate(
         return (SkipReason.NOT_PERP, None)
     if is_blocked(symbol):
         return (SkipReason.SYMBOL_BLOCKED, None)
+    if not vol_ratio_ok(vol_ratio):
+        return (SkipReason.LOW_VOL_RATIO, None)
+    if not funding_ok(funding_pct):
+        return (SkipReason.FUNDING_EXTREME, None)
+    if not hour_ok(datetime.now(timezone.utc)):
+        return (SkipReason.BLOCKED_HOUR, None)
     if await equity.is_kill_switch_tripped():
         return (SkipReason.KILL_SWITCH, None)
     if not supports_exchange(exchange):

@@ -102,6 +102,8 @@ class BotListener:
                 exchange=exchange,
                 market_type=market_type,
                 direction=direction,
+                vol_ratio=alert.get("vol_ratio"),
+                funding_pct=alert.get("funding_pct"),
             )
             if skip_reason is not None:
                 await executor.log_skipped(
