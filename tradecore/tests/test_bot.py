@@ -549,3 +549,34 @@ class TestDirectionEnabled:
         monkeypatch.setattr(settings, "bot_short_enabled", False)
         assert vetoes.direction_enabled(Direction.LONG) is True
         assert vetoes.direction_enabled(Direction.SHORT) is False
+
+
+# ---------- liquidity-aware notional cap ----------
+
+
+class TestEffectiveNotionalCap:
+    def test_disabled_returns_base_cap(self):
+        cap = strategy.effective_notional_cap_pct(
+            Decimal("0.05"), Decimal("10000"), Decimal("50000"), Decimal("0")
+        )
+        assert cap == Decimal("0.05")
+
+    def test_unknown_turnover_returns_base_cap(self):
+        cap = strategy.effective_notional_cap_pct(
+            Decimal("0.05"), Decimal("10000"), None, Decimal("0.005")
+        )
+        assert cap == Decimal("0.05")
+
+    def test_thin_book_shrinks_cap(self):
+        # 0.5% of $50k turnover = $250 → 2.5% of $10k equity < 5% base cap.
+        cap = strategy.effective_notional_cap_pct(
+            Decimal("0.05"), Decimal("10000"), Decimal("50000"), Decimal("0.005")
+        )
+        assert cap == Decimal("0.025")
+
+    def test_deep_book_keeps_base_cap(self):
+        # 0.5% of $10M turnover = $50k → far above the 5% ($500) base cap.
+        cap = strategy.effective_notional_cap_pct(
+            Decimal("0.05"), Decimal("10000"), Decimal("10000000"), Decimal("0.005")
+        )
+        assert cap == Decimal("0.05")

@@ -110,6 +110,46 @@ async def check_and_maybe_trip_kill_switch() -> bool:
     return False
 
 
+STOPS_LIST_KEY = "bot:recent_stops"
+THROTTLE_KEY = "bot:throttle"
+
+
+async def record_stop_close() -> None:
+    """Log a stop-out timestamp and trip the loss throttle if N stops landed
+    inside the window. Throttled = risk_per_trade is multiplied by
+    bot_loss_throttle_factor until the cooldown key expires."""
+    n_trip = int(getattr(app_settings, "bot_loss_throttle_stops", 0) or 0)
+    r = redis_service.get_redis()
+    now = datetime.now(timezone.utc)
+    await r.lpush(STOPS_LIST_KEY, now.isoformat())
+    await r.ltrim(STOPS_LIST_KEY, 0, 49)
+    if n_trip <= 0:
+        return
+    window_h = float(app_settings.bot_loss_throttle_window_hours)
+    cutoff = now.timestamp() - window_h * 3600
+    recent = 0
+    for raw in await r.lrange(STOPS_LIST_KEY, 0, n_trip - 1):
+        try:
+            if datetime.fromisoformat(_decode(raw)).timestamp() >= cutoff:
+                recent += 1
+        except ValueError:
+            continue
+    if recent >= n_trip:
+        cooldown_s = int(float(app_settings.bot_loss_throttle_cooldown_hours) * 3600)
+        await r.set(THROTTLE_KEY, "1", ex=max(60, cooldown_s))
+
+
+async def throttle_factor() -> Decimal:
+    """Risk multiplier for new entries — 1 normally, the configured factor
+    while the loss throttle is tripped."""
+    if int(getattr(app_settings, "bot_loss_throttle_stops", 0) or 0) <= 0:
+        return Decimal("1")
+    r = redis_service.get_redis()
+    if await r.exists(THROTTLE_KEY):
+        return Decimal(str(app_settings.bot_loss_throttle_factor))
+    return Decimal("1")
+
+
 async def get_concurrent_count() -> int:
     r = redis_service.get_redis()
     raw = await r.get(CONCURRENT_KEY)

@@ -168,15 +168,34 @@ class BotListener:
                 if live_px is not None and live_px > 0
                 else Decimal(str(entry_candle.get("c") or entry_candle.get("close") or 0))
             )
+            # Liquidity at entry — recorded for turnover-floor calibration and,
+            # when bot_max_turnover_notional_pct is set, used to shrink the
+            # notional cap so positions stay small relative to the book.
+            try:
+                entry_turnover = Decimal(
+                    str(await candle_source.recent_turnover_usd(symbol, exchange, market_type))
+                )
+            except Exception:
+                entry_turnover = None
+            size_cap_pct = strategy.effective_notional_cap_pct(
+                Decimal(str(app_settings.bot_position_size_pct)),
+                paper_equity,
+                entry_turnover,
+                Decimal(str(app_settings.bot_max_turnover_notional_pct)),
+            )
+            # Loss throttle: recent stop cluster → trade smaller until cooldown.
+            risk_pct = Decimal(str(app_settings.bot_risk_per_trade_pct)) * (
+                await equity.throttle_factor()
+            )
             plan = strategy.plan_entry(
                 alert=alert,
                 signal_candle=signal_candle,
                 entry_price=entry_price,
                 paper_equity=paper_equity,
-                position_size_pct=Decimal(str(app_settings.bot_position_size_pct)),
+                position_size_pct=size_cap_pct,
                 stop_buffer_pct=Decimal(str(app_settings.bot_stop_buffer_pct)),
                 r_multiple=Decimal(str(app_settings.bot_take_profit_r_multiple)),
-                risk_per_trade_pct=Decimal(str(app_settings.bot_risk_per_trade_pct)),
+                risk_per_trade_pct=risk_pct,
                 oracle_score=Decimal(str(oracle_score)) if oracle_score is not None else None,
             )
             if plan is None:
@@ -188,15 +207,6 @@ class BotListener:
                     extra_context={"entry_candle": entry_candle, "signal_candle": signal_candle},
                 )
                 return
-
-            # Liquidity at entry — recorded (not gated) so the turnover floor can
-            # be calibrated against realized outcomes.
-            try:
-                entry_turnover = Decimal(
-                    str(await candle_source.recent_turnover_usd(symbol, exchange, market_type))
-                )
-            except Exception:
-                entry_turnover = None
 
             await executor.open_paper_trade(
                 db,
