@@ -177,6 +177,12 @@ class Settings(BaseSettings):
     bot_loss_throttle_cooldown_hours: float = 24.0
     bot_max_turnover_notional_pct: float = 0.0   # notional ≤ pct × rolling 12-bar turnover (live-viability
                                                  # guard on thin books). 0 disables.
+    # Entry-quality filters from the 2026-07-10 calibration (in-sample; forward-
+    # testing via prod compose env). Code defaults OFF.
+    bot_min_vol_ratio: float = 0.0               # skip when signal vol_ratio < this (calib: <15 bleeds). 0 disables.
+    bot_max_abs_funding: float = 0.0             # skip when |funding| ≥ this fraction (calib: ≥0.002 inverts
+                                                 # the squeeze thesis). 0 disables.
+    bot_blocked_hours_utc: str = ""              # comma-separated UTC hours to skip entries (e.g. "0,1,2,3,4,5")
     # Asset selection — code defaults OFF (no behaviour change); the active prod
     # policy is set via compose env. See bot/vetoes.py.
     bot_perp_only: bool = False                  # skip non-perp (spot) signals — spot can't be shorted live

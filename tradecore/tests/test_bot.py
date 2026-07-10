@@ -580,3 +580,44 @@ class TestEffectiveNotionalCap:
             Decimal("0.05"), Decimal("10000"), Decimal("10000000"), Decimal("0.005")
         )
         assert cap == Decimal("0.05")
+
+
+# ---------- entry-quality filters (2026-07-10 calibration) ----------
+
+
+class TestEntryQualityFilters:
+    def test_vol_ratio_gate(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_min_vol_ratio", 15.0)
+        assert vetoes.vol_ratio_ok(20.0) is True
+        assert vetoes.vol_ratio_ok(14.9) is False
+        assert vetoes.vol_ratio_ok(None) is True  # unknown → allow
+        monkeypatch.setattr(settings, "bot_min_vol_ratio", 0.0)
+        assert vetoes.vol_ratio_ok(1.0) is True
+
+    def test_funding_veto_is_two_sided(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_max_abs_funding", 0.002)
+        assert vetoes.funding_ok(0.001) is True
+        assert vetoes.funding_ok(0.002) is False
+        assert vetoes.funding_ok(-0.003) is False
+        assert vetoes.funding_ok(None) is True
+        monkeypatch.setattr(settings, "bot_max_abs_funding", 0.0)
+        assert vetoes.funding_ok(0.01) is True
+
+    def test_blocked_hours_parsing_and_gate(self, monkeypatch):
+        from datetime import datetime, timezone
+
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_blocked_hours_utc", "0, 1,2,25,junk")
+        assert vetoes.blocked_hours() == {0, 1, 2}
+        assert vetoes.hour_ok(datetime(2026, 7, 10, 1, 30, tzinfo=timezone.utc)) is False
+        assert vetoes.hour_ok(datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)) is True
+        monkeypatch.setattr(settings, "bot_blocked_hours_utc", "")
+        assert vetoes.hour_ok(datetime(2026, 7, 10, 1, 30, tzinfo=timezone.utc)) is True
