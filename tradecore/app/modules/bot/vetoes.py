@@ -40,6 +40,14 @@ def is_blocked(symbol: str) -> bool:
     return symbol.upper() in blocklist()
 
 
+def direction_enabled(direction: Direction) -> bool:
+    """Per-direction gate. Both default on; flip via env when fresh data shows a
+    side is negative-EV. Config, not code — the June/July samples flipped sign."""
+    if direction == Direction.LONG:
+        return bool(getattr(app_settings, "bot_long_enabled", True))
+    return bool(getattr(app_settings, "bot_short_enabled", True))
+
+
 def market_allowed(market_type: str | None) -> bool:
     """False when perp-only mode is on and this isn't a perp. Spot can't be
     shorted live, so its (paper-only) short edge is fiction — see asset analysis."""
@@ -128,6 +136,8 @@ async def evaluate(
     """
     if not getattr(app_settings, "bot_enabled", False):
         return (SkipReason.BOT_DISABLED, None)
+    if not direction_enabled(direction):
+        return (SkipReason.DIRECTION_DISABLED, None)
     if not market_allowed(market_type):
         return (SkipReason.NOT_PERP, None)
     if is_blocked(symbol):

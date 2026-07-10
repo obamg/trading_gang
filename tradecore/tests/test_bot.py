@@ -452,3 +452,100 @@ class TestFees:
 
     def test_zero_fee_is_zero(self):
         assert strategy.round_trip_fee(Decimal("500"), Decimal("520"), Decimal("0")) == Decimal("0")
+
+
+# ---------- funding accrual ----------
+
+
+class TestFundingPnl:
+    def test_long_pays_positive_funding(self):
+        pnl = strategy.estimated_funding_pnl(
+            Direction.LONG, Decimal("1000"), Decimal("0.001"), hold_hours=24, interval_hours=8
+        )
+        assert pnl == Decimal("-3")  # 3 intervals × 0.1% × $1000, long pays
+
+    def test_short_receives_positive_funding(self):
+        pnl = strategy.estimated_funding_pnl(
+            Direction.SHORT, Decimal("1000"), Decimal("0.001"), hold_hours=24, interval_hours=8
+        )
+        assert pnl == Decimal("3")
+
+    def test_long_receives_negative_funding(self):
+        pnl = strategy.estimated_funding_pnl(
+            Direction.LONG, Decimal("1000"), Decimal("-0.002"), hold_hours=8, interval_hours=8
+        )
+        assert pnl == Decimal("2")
+
+    def test_hold_shorter_than_interval_accrues_nothing(self):
+        pnl = strategy.estimated_funding_pnl(
+            Direction.SHORT, Decimal("1000"), Decimal("0.001"), hold_hours=7.9, interval_hours=8
+        )
+        assert pnl == Decimal("0")
+
+    def test_zero_interval_disables_accrual(self):
+        pnl = strategy.estimated_funding_pnl(
+            Direction.SHORT, Decimal("1000"), Decimal("0.001"), hold_hours=24, interval_hours=0
+        )
+        assert pnl == Decimal("0")
+
+    def test_none_funding_is_zero(self):
+        pnl = strategy.estimated_funding_pnl(
+            Direction.LONG, Decimal("1000"), None, hold_hours=24, interval_hours=8
+        )
+        assert pnl == Decimal("0")
+
+
+# ---------- net R ----------
+
+
+class TestNetR:
+    def test_net_r_is_pnl_over_dollar_risk(self):
+        # entry 100, stop 95 → $5 risk/unit; qty 10 → $50 at risk. $95 net pnl = 1.9R.
+        r = strategy.net_r_multiple(Decimal("95"), Decimal("100"), Decimal("95"), Decimal("10"))
+        assert r == Decimal("1.9")
+
+    def test_net_r_below_gross_r_when_costs_positive(self):
+        entry, stop, qty = Decimal("100"), Decimal("95"), Decimal("10")
+        exit_price = Decimal("110")  # clean 2R winner on price
+        gross_r = strategy.realized_r_multiple(Direction.LONG, entry, stop, exit_price)
+        gross_pnl = strategy.realized_pnl(Direction.LONG, entry, exit_price, qty)
+        fees = strategy.round_trip_fee(entry * qty, exit_price * qty, Decimal("0.0006"))
+        net_r = strategy.net_r_multiple(gross_pnl - fees, entry, stop, qty)
+        assert gross_r == Decimal("2")
+        assert net_r < gross_r
+
+    def test_zero_risk_returns_zero(self):
+        r = strategy.net_r_multiple(Decimal("10"), Decimal("100"), Decimal("100"), Decimal("10"))
+        assert r == Decimal("0")
+
+
+# ---------- per-direction gates ----------
+
+
+class TestDirectionEnabled:
+    def test_defaults_allow_both(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_long_enabled", True)
+        monkeypatch.setattr(settings, "bot_short_enabled", True)
+        assert vetoes.direction_enabled(Direction.LONG) is True
+        assert vetoes.direction_enabled(Direction.SHORT) is True
+
+    def test_long_gate_blocks_only_longs(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_long_enabled", False)
+        monkeypatch.setattr(settings, "bot_short_enabled", True)
+        assert vetoes.direction_enabled(Direction.LONG) is False
+        assert vetoes.direction_enabled(Direction.SHORT) is True
+
+    def test_short_gate_blocks_only_shorts(self, monkeypatch):
+        from app.config import settings
+        from app.modules.bot import vetoes
+
+        monkeypatch.setattr(settings, "bot_long_enabled", True)
+        monkeypatch.setattr(settings, "bot_short_enabled", False)
+        assert vetoes.direction_enabled(Direction.LONG) is True
+        assert vetoes.direction_enabled(Direction.SHORT) is False

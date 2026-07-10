@@ -48,8 +48,16 @@ class BotTrade(Base):
     close_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
     realized_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
     realized_r: Mapped[Decimal | None] = mapped_column(Numeric(8, 3), nullable=True)
+    # realized_r is price-move only; realized_r_net is net PnL (fees, slippage,
+    # funding) over dollar-risk at entry — the number scale-up decisions use.
+    realized_r_net: Mapped[Decimal | None] = mapped_column(Numeric(8, 3), nullable=True)
+    fees_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
+    funding_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
 
     oracle_score_at_entry: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    # Rolling USD turnover at entry — the liquidity axis for calibrating
+    # bot_min_turnover_usd against realized outcomes.
+    entry_turnover_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
     vol_ratio: Mapped[Decimal | None] = mapped_column(Numeric(8, 3), nullable=True)
     funding_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 5), nullable=True)
     pct_change: Mapped[Decimal | None] = mapped_column(Numeric(8, 5), nullable=True)

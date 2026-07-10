@@ -27,6 +27,7 @@ class SkipReason(str, Enum):
     NOT_PERP = "not_perp"
     SYMBOL_BLOCKED = "symbol_blocked"
     LOW_TURNOVER = "low_turnover"
+    DIRECTION_DISABLED = "direction_disabled"
 
 
 class CloseReason(str, Enum):

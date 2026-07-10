@@ -165,6 +165,9 @@ class Settings(BaseSettings):
                                                  # (frees orphans whose candle stream went stale). 0 disables.
     bot_fee_pct_per_side: float = 0.0006         # taker fee per side (Bybit ~0.06%); charged on entry+exit
     bot_slippage_pct: float = 0.0005             # adverse slippage on market exits (stop/manual/timeout)
+    bot_funding_interval_hours: float = 8.0      # perp funding interval for accrual estimate. 0 disables.
+    bot_long_enabled: bool = True                # per-direction gates — flip via env, not code,
+    bot_short_enabled: bool = True               # when fresh data shows a side is negative-EV
     # Asset selection — code defaults OFF (no behaviour change); the active prod
     # policy is set via compose env. See bot/vetoes.py.
     bot_perp_only: bool = False                  # skip non-perp (spot) signals — spot can't be shorted live

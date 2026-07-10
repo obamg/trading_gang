@@ -160,7 +160,14 @@ class BotListener:
                 return
 
             paper_equity = await equity.get_paper_equity()
-            entry_price = Decimal(str(entry_candle.get("c") or entry_candle.get("close") or 0))
+            # Prefer a live price (Bybit orderbook mid) — the latest Redis candle
+            # is a CLOSED 5m bar, up to 5min stale right after a cascade.
+            live_px = await candle_source.get_live_price(symbol, exchange, market_type)
+            entry_price = (
+                live_px
+                if live_px is not None and live_px > 0
+                else Decimal(str(entry_candle.get("c") or entry_candle.get("close") or 0))
+            )
             plan = strategy.plan_entry(
                 alert=alert,
                 signal_candle=signal_candle,
@@ -182,11 +189,21 @@ class BotListener:
                 )
                 return
 
+            # Liquidity at entry — recorded (not gated) so the turnover floor can
+            # be calibrated against realized outcomes.
+            try:
+                entry_turnover = Decimal(
+                    str(await candle_source.recent_turnover_usd(symbol, exchange, market_type))
+                )
+            except Exception:
+                entry_turnover = None
+
             await executor.open_paper_trade(
                 db,
                 plan,
                 entry_price=entry_price,
                 oracle_score=Decimal(str(oracle_score)) if oracle_score is not None else None,
+                entry_turnover_usd=entry_turnover,
             )
 
 

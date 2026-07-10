@@ -30,6 +30,7 @@ async def open_paper_trade(
     entry_price: Decimal,
     *,
     oracle_score: Decimal | None = None,
+    entry_turnover_usd: Decimal | None = None,
 ) -> BotTrade:
     """Insert the trade row, increment counter, publish trade_opened alert."""
     qty = strategy.compute_qty(plan.notional_usd, entry_price)
@@ -51,6 +52,7 @@ async def open_paper_trade(
         stop_price=plan.stop_price,
         take_profit_price=plan.take_profit_price,
         oracle_score_at_entry=oracle_score,
+        entry_turnover_usd=entry_turnover_usd,
         vol_ratio=plan.vol_ratio,
         funding_pct=plan.funding_pct,
         pct_change=plan.pct_change,
@@ -118,17 +120,35 @@ async def close_paper_trade(
         fill_price * trade.qty,
         Decimal(str(app_settings.bot_fee_pct_per_side)),
     )
-    pnl = gross_pnl - fees
+    now = datetime.now(timezone.utc)
+
+    # Funding leg — perps only. Shorts entered on positive-funding cascades
+    # collect it while held; longs on negative funding likewise.
+    funding_pnl = Decimal("0")
+    if (trade.market_type or "").lower() == "perp":
+        hold_hours = (now - trade.entry_at).total_seconds() / 3600.0
+        funding_pnl = strategy.estimated_funding_pnl(
+            direction,
+            trade.entry_price * trade.qty,
+            trade.funding_pct,
+            hold_hours,
+            float(getattr(app_settings, "bot_funding_interval_hours", 0) or 0),
+        )
+
+    pnl = gross_pnl - fees + funding_pnl
     r_multiple = strategy.realized_r_multiple(
         direction, trade.entry_price, trade.stop_price, fill_price
     )
-    now = datetime.now(timezone.utc)
+    r_net = strategy.net_r_multiple(pnl, trade.entry_price, trade.stop_price, trade.qty)
 
     trade.close_price = fill_price
     trade.closed_at = now
     trade.close_reason = reason.value
     trade.realized_pnl_usd = pnl
     trade.realized_r = r_multiple
+    trade.realized_r_net = r_net
+    trade.fees_usd = fees
+    trade.funding_pnl_usd = funding_pnl
     trade.status = "closed"
     await db.commit()
 
@@ -154,7 +174,9 @@ async def close_paper_trade(
             "close_reason": reason.value,
             "realized_pnl_usd": float(pnl),
             "realized_r": float(r_multiple),
+            "realized_r_net": float(r_net),
             "fees_usd": float(fees),
+            "funding_pnl_usd": float(funding_pnl),
             "closed_at": now.isoformat(),
         },
     )
@@ -166,7 +188,9 @@ async def close_paper_trade(
         pnl=float(pnl),
         gross_pnl=float(gross_pnl),
         fees=float(fees),
+        funding=float(funding_pnl),
         r=float(r_multiple),
+        r_net=float(r_net),
     )
     return trade
 
