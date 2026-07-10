@@ -180,6 +180,38 @@ class TelegramService:
 
     # ---------- alert delivery ----------
 
+    async def send_message(self, chat_id: int, text: str) -> bool:
+        """Send a pre-formatted Markdown message to one chat.
+
+        Unlike send_alert this does not require the polling Application to be
+        running: one-shot cron scripts (e.g. app.scripts.forward_test_report)
+        build a throwaway Bot client from the same configured token.
+        """
+        if not settings.telegram_bot_token:
+            log.info("telegram_disabled")
+            return False
+        try:
+            from telegram import Bot
+        except ImportError:
+            log.warning("telegram_not_installed")
+            return False
+        kwargs = dict(
+            chat_id=chat_id,
+            text=text,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+        )
+        try:
+            if self._app is not None:
+                await self._app.bot.send_message(**kwargs)
+            else:
+                async with Bot(settings.telegram_bot_token) as bot:
+                    await bot.send_message(**kwargs)
+            return True
+        except Exception as e:
+            log.warning("telegram_send_failed", chat_id=chat_id, error=str(e))
+            return False
+
     async def send_alert(self, chat_id: int, module: str, alert_data: dict) -> bool:
         if not self._running or self._app is None:
             return False
