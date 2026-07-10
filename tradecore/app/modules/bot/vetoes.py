@@ -56,6 +56,21 @@ def market_allowed(market_type: str | None) -> bool:
     return (market_type or "").lower() == "perp"
 
 
+async def total_open_risk_usd(db: AsyncSession) -> float:
+    """Σ |entry − stop| × qty over open trades — the portfolio's worst-case
+    loss if every open stop hits at once (which, on correlated microcaps in a
+    market-wide cascade, is exactly what happens)."""
+    from sqlalchemy import func
+    res = await db.execute(
+        select(
+            func.coalesce(
+                func.sum(func.abs(BotTrade.entry_price - BotTrade.stop_price) * BotTrade.qty), 0
+            )
+        ).where(BotTrade.status == "open")
+    )
+    return float(res.scalar_one())
+
+
 async def already_open(db: AsyncSession, symbol: str) -> bool:
     res = await db.execute(
         select(BotTrade.id)
@@ -153,6 +168,12 @@ async def evaluate(
     concurrent = await equity.get_concurrent_count()
     if concurrent >= int(app_settings.bot_max_concurrent):
         return (SkipReason.MAX_CONCURRENT, None)
+    max_heat = float(getattr(app_settings, "bot_max_open_risk_pct", 0) or 0)
+    if max_heat > 0:
+        open_risk = await total_open_risk_usd(db)
+        eq = float(await equity.get_paper_equity())
+        if eq > 0 and open_risk / eq >= max_heat:
+            return (SkipReason.MAX_OPEN_RISK, None)
     veto, score = await oracle_veto(db, symbol, direction)
     if veto:
         return (SkipReason.ORACLE_VETO, score)

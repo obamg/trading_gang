@@ -136,6 +136,30 @@ def round_trip_fee(
     return (abs(entry_notional) + abs(exit_notional)) * fee_pct_per_side
 
 
+def effective_notional_cap_pct(
+    base_cap_pct: Decimal,
+    paper_equity: Decimal,
+    entry_turnover_usd: Decimal | None,
+    max_turnover_notional_pct: Decimal,
+) -> Decimal:
+    """Notional cap as pct of equity, shrunk by available liquidity.
+
+    On thin Innovation-zone books a position that dwarfs recent turnover can't
+    exit near the modeled price — cap notional at
+    ``max_turnover_notional_pct × rolling turnover``. Disabled (base cap) when
+    the knob is 0 or turnover is unknown.
+    """
+    if (
+        max_turnover_notional_pct <= 0
+        or entry_turnover_usd is None
+        or entry_turnover_usd <= 0
+        or paper_equity <= 0
+    ):
+        return base_cap_pct
+    turnover_cap_pct = (entry_turnover_usd * max_turnover_notional_pct) / paper_equity
+    return min(base_cap_pct, turnover_cap_pct)
+
+
 def estimated_funding_pnl(
     direction: Direction,
     entry_notional: Decimal,

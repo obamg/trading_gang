@@ -168,6 +168,15 @@ class Settings(BaseSettings):
     bot_funding_interval_hours: float = 8.0      # perp funding interval for accrual estimate. 0 disables.
     bot_long_enabled: bool = True                # per-direction gates — flip via env, not code,
     bot_short_enabled: bool = True               # when fresh data shows a side is negative-EV
+    # Risk governors — all default OFF; they exist so risk_per_trade can be raised
+    # safely (correlated microcap positions are one trade wearing five hats).
+    bot_max_open_risk_pct: float = 0.0           # skip entries when Σ open $risk / equity ≥ this. 0 disables.
+    bot_loss_throttle_stops: int = 0             # N stop-outs within the window trips the throttle. 0 disables.
+    bot_loss_throttle_window_hours: float = 6.0
+    bot_loss_throttle_factor: float = 0.5        # risk multiplier while throttled
+    bot_loss_throttle_cooldown_hours: float = 24.0
+    bot_max_turnover_notional_pct: float = 0.0   # notional ≤ pct × rolling 12-bar turnover (live-viability
+                                                 # guard on thin books). 0 disables.
     # Asset selection — code defaults OFF (no behaviour change); the active prod
     # policy is set via compose env. See bot/vetoes.py.
     bot_perp_only: bool = False                  # skip non-perp (spot) signals — spot can't be shorted live

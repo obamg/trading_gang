@@ -160,6 +160,8 @@ async def close_paper_trade(
 
     # Kill-switch check piggybacks on each close — fastest feedback loop.
     await equity.check_and_maybe_trip_kill_switch()
+    if reason == CloseReason.STOP:
+        await equity.record_stop_close()
 
     await redis_service.publish_alert(
         "bot",
