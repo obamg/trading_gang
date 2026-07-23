@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.config import settings as app_settings
@@ -189,6 +190,72 @@ class BotListener:
             risk_pct = Decimal(str(app_settings.bot_risk_per_trade_pct)) * (
                 await equity.throttle_factor()
             )
+            stop_floor = Decimal(str(app_settings.bot_min_stop_distance_pct))
+            entry_mode = str(getattr(app_settings, "bot_entry_mode", "chase") or "chase").lower()
+
+            if entry_mode == "retrace":
+                # Retrace LIMIT: rest an order depth×range into the signal bar
+                # instead of chasing the cascade close. Stop and sizing are both
+                # computed off the LIMIT — the price we would actually fill at.
+                signal_high, signal_low, _ = strategy.parse_candle(signal_candle)
+                limit_price = strategy.compute_retrace_limit(
+                    direction,
+                    entry_price,
+                    signal_high,
+                    signal_low,
+                    Decimal(str(app_settings.bot_retrace_depth)),
+                )
+                if limit_price is None:
+                    await executor.log_skipped(
+                        db,
+                        alert=alert,
+                        direction=direction,
+                        reason=SkipReason.NO_CANDLES,
+                        extra_context={
+                            "retrace": "degenerate_limit",
+                            "ref_price": str(entry_price),
+                            "signal_candle": signal_candle,
+                        },
+                    )
+                    return
+                plan = strategy.plan_entry(
+                    alert=alert,
+                    signal_candle=signal_candle,
+                    entry_price=limit_price,
+                    paper_equity=paper_equity,
+                    position_size_pct=size_cap_pct,
+                    stop_buffer_pct=Decimal(str(app_settings.bot_stop_buffer_pct)),
+                    r_multiple=Decimal(str(app_settings.bot_take_profit_r_multiple)),
+                    risk_per_trade_pct=risk_pct,
+                    oracle_score=Decimal(str(oracle_score)) if oracle_score is not None else None,
+                    stop_floor_pct=stop_floor,
+                )
+                if plan is None:
+                    await executor.log_skipped(
+                        db,
+                        alert=alert,
+                        direction=direction,
+                        reason=SkipReason.NO_CANDLES,
+                        extra_context={
+                            "retrace": "invalid_plan",
+                            "limit_price": str(limit_price),
+                            "signal_candle": signal_candle,
+                        },
+                    )
+                    return
+                expire_at = datetime.now(timezone.utc) + timedelta(
+                    minutes=5 * int(app_settings.bot_retrace_window_bars)
+                )
+                await executor.place_pending_trade(
+                    db,
+                    plan,
+                    limit_price=limit_price,
+                    expire_at=expire_at,
+                    oracle_score=Decimal(str(oracle_score)) if oracle_score is not None else None,
+                    entry_turnover_usd=entry_turnover,
+                )
+                return
+
             plan = strategy.plan_entry(
                 alert=alert,
                 signal_candle=signal_candle,
@@ -199,6 +266,7 @@ class BotListener:
                 r_multiple=Decimal(str(app_settings.bot_take_profit_r_multiple)),
                 risk_per_trade_pct=risk_pct,
                 oracle_score=Decimal(str(oracle_score)) if oracle_score is not None else None,
+                stop_floor_pct=stop_floor,
             )
             if plan is None:
                 await executor.log_skipped(

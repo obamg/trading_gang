@@ -104,9 +104,11 @@ async def total_open_risk_usd(db: AsyncSession) -> float:
 
 
 async def already_open(db: AsyncSession, symbol: str) -> bool:
+    # Pending retrace limits reserve the symbol too — a second alert must not
+    # stack a chase entry (or another limit) on top of a working order.
     res = await db.execute(
         select(BotTrade.id)
-        .where(BotTrade.symbol == symbol, BotTrade.status == "open")
+        .where(BotTrade.symbol == symbol, BotTrade.status.in_(("open", "pending")))
         .limit(1)
     )
     return res.scalar_one_or_none() is not None

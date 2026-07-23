@@ -80,6 +80,31 @@ class FakeRedis:
     async def exists(self, key: str):
         return 1 if key in self._keys else 0
 
+    async def delete(self, *keys: str):
+        removed = 0
+        for key in keys:
+            for store in (self._keys, self._lists, self._sets, self._hashes, self._zsets):
+                if key in store:
+                    del store[key]
+                    removed += 1
+        return removed
+
+    async def incr(self, key: str):
+        val = int(self._keys.get(key, "0")) + 1
+        self._keys[key] = str(val)
+        return val
+
+    async def decr(self, key: str):
+        val = int(self._keys.get(key, "0")) - 1
+        self._keys[key] = str(val)
+        return val
+
+    async def hset(self, key: str, mapping: dict | None = None, **kwargs):
+        h = self._hashes.setdefault(key, {})
+        if mapping:
+            h.update({k: str(v) for k, v in mapping.items()})
+        return len(mapping or {})
+
     async def smembers(self, key: str):
         return self._sets.get(key, set())
 
