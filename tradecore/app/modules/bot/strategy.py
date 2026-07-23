@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.modules.bot.schemas import Direction, TradePlan
+from app.modules.bot.schemas import Direction, TradePlan, TrailState
 
 DETECTOR_DIRECTION_MAP: dict[str, Direction] = {
     "short_squeeze": Direction.LONG,
@@ -46,6 +46,53 @@ def compute_stop(
     if direction == Direction.LONG:
         return signal_low * (Decimal("1") - buffer_pct)
     return signal_high * (Decimal("1") + buffer_pct)
+
+
+def compute_retrace_limit(
+    direction: Direction,
+    ref_price: Decimal,
+    signal_high: Decimal,
+    signal_low: Decimal,
+    depth: Decimal,
+) -> Decimal | None:
+    """Retrace LIMIT price: pull back ``depth`` × the signal-bar range from the
+    reference price, clamped inside the signal bar (a long limit never sits
+    below the signal low — that's where the stop lives).
+
+    Returns None when degenerate: broken range, non-positive limit, or a limit
+    that is not strictly better than the reference (≥ ref for longs, ≤ ref for
+    shorts) — e.g. price already retraced through the whole bar.
+    """
+    price_range = signal_high - signal_low
+    if ref_price <= 0 or price_range <= 0:
+        return None
+    if direction == Direction.LONG:
+        limit = max(ref_price - depth * price_range, signal_low)
+        if limit <= 0 or limit >= ref_price:
+            return None
+        return limit
+    limit = min(ref_price + depth * price_range, signal_high)
+    if limit <= 0 or limit <= ref_price:
+        return None
+    return limit
+
+
+def apply_stop_floor(
+    direction: Direction,
+    entry_price: Decimal,
+    stop_price: Decimal,
+    floor_pct: Decimal,
+) -> Decimal:
+    """Enforce a minimum stop distance: if |entry−stop|/entry < floor, push the
+    stop to entry × (1∓floor). Replay evidence: sub-floor stops are noise-width
+    and get swept before the thesis can play out."""
+    if floor_pct <= 0 or entry_price <= 0:
+        return stop_price
+    if abs(entry_price - stop_price) / entry_price >= floor_pct:
+        return stop_price
+    if direction == Direction.LONG:
+        return entry_price * (Decimal("1") - floor_pct)
+    return entry_price * (Decimal("1") + floor_pct)
 
 
 def compute_take_profit(
@@ -108,6 +155,120 @@ def is_tp_hit(direction: Direction, bar_high: Decimal, bar_low: Decimal, tp: Dec
     if direction == Direction.LONG:
         return bar_high >= tp
     return bar_low <= tp
+
+
+def is_limit_filled(
+    direction: Direction, bar_high: Decimal, bar_low: Decimal, limit: Decimal
+) -> bool:
+    """A resting retrace limit fills when the bar trades through it."""
+    if direction == Direction.LONG:
+        return bar_low <= limit
+    return bar_high >= limit
+
+
+def check_pending_fill(
+    direction: Direction,
+    bar_high: Decimal,
+    bar_low: Decimal,
+    limit: Decimal,
+    stop: Decimal,
+) -> str:
+    """Fill verdict for one bar against a pending limit: ``none`` / ``filled`` /
+    ``filled_stopped``. Pessimistic: a bar that reaches the limit AND the stop
+    is treated as fill-then-immediate-stop (we can't see intra-bar ordering)."""
+    if not is_limit_filled(direction, bar_high, bar_low, limit):
+        return "none"
+    if is_stop_hit(direction, bar_high, bar_low, stop):
+        return "filled_stopped"
+    return "filled"
+
+
+def partial_target(
+    direction: Direction, entry: Decimal, initial_stop: Decimal, take_r: Decimal
+) -> Decimal:
+    """Price of the partial take — ``take_r`` R from entry against the INITIAL
+    stop (trailing must not shift the target)."""
+    return compute_take_profit(direction, entry, initial_stop, take_r)
+
+
+def trail_stop_from_peak(
+    direction: Direction, peak: Decimal, risk_per_unit: Decimal, trail_distance_r: Decimal
+) -> Decimal:
+    """Candidate trail stop: ``trail_distance_r`` R behind the favorable peak."""
+    dist = trail_distance_r * risk_per_unit
+    if direction == Direction.LONG:
+        return peak - dist
+    return peak + dist
+
+
+def trail_armed(
+    direction: Direction,
+    entry: Decimal,
+    peak: Decimal,
+    risk_per_unit: Decimal,
+    arm_r: Decimal,
+) -> bool:
+    """The trail only turns on once favorable excursion ≥ arm_r × risk —
+    before that the original stop stands, so noise can't ratchet us out."""
+    if risk_per_unit <= 0:
+        return False
+    excursion = (peak - entry) if direction == Direction.LONG else (entry - peak)
+    return excursion >= arm_r * risk_per_unit
+
+
+def ratchet_stop(direction: Direction, current_stop: Decimal, candidate: Decimal) -> Decimal:
+    """A trail stop only ever moves in the trade's favor."""
+    if direction == Direction.LONG:
+        return max(current_stop, candidate)
+    return min(current_stop, candidate)
+
+
+def step_trail_bar(
+    direction: Direction,
+    entry: Decimal,
+    initial_stop: Decimal,
+    state: TrailState,
+    bar_high: Decimal,
+    bar_low: Decimal,
+    *,
+    partial_take_r: Decimal,
+    trail_arm_r: Decimal,
+    trail_distance_r: Decimal,
+) -> tuple[TrailState, list[tuple[str, Decimal]]]:
+    """Advance the partial-trail state machine by one closed bar.
+
+    Returns (new_state, events) where events ∈ [("stop", px), ("partial", px)].
+    Ordering constraints encoded here:
+      - stop is checked against the PRE-bar stop first and wins any tie with
+        the partial target (pessimistic intra-bar fill, same as v1 monitor);
+      - the partial fills limit-style at its exact target price;
+      - peak/ratchet update happens on bar close, so a new trail level can
+        only stop us out on a LATER bar.
+    """
+    if is_stop_hit(direction, bar_high, bar_low, state.stop):
+        return state, [("stop", state.stop)]
+
+    events: list[tuple[str, Decimal]] = []
+    partial_taken = state.partial_taken
+    if not partial_taken:
+        target = partial_target(direction, entry, initial_stop, partial_take_r)
+        if is_tp_hit(direction, bar_high, bar_low, target):
+            events.append(("partial", target))
+            partial_taken = True
+
+    favorable = bar_high if direction == Direction.LONG else bar_low
+    peak = (
+        max(state.peak, favorable)
+        if direction == Direction.LONG
+        else min(state.peak, favorable)
+    )
+    stop = state.stop
+    risk_per_unit = abs(entry - initial_stop)
+    if trail_armed(direction, entry, peak, risk_per_unit, trail_arm_r):
+        stop = ratchet_stop(
+            direction, stop, trail_stop_from_peak(direction, peak, risk_per_unit, trail_distance_r)
+        )
+    return TrailState(stop=stop, peak=peak, partial_taken=partial_taken), events
 
 
 def realized_pnl(direction: Direction, entry: Decimal, exit_price: Decimal, qty: Decimal) -> Decimal:
@@ -225,6 +386,7 @@ def plan_entry(
     r_multiple: Decimal,
     risk_per_trade_pct: Decimal | None = None,
     oracle_score: Decimal | None = None,
+    stop_floor_pct: Decimal | None = None,
 ) -> TradePlan | None:
     """Build a TradePlan or return None if the inputs don't validate.
 
@@ -233,6 +395,9 @@ def plan_entry(
 
     ``position_size_pct`` is the notional cap; ``risk_per_trade_pct`` (when set)
     drives risk-normalized sizing within that cap — see ``compute_notional``.
+    ``entry_price`` is the fill for chase mode or the LIMIT for retrace mode;
+    ``stop_floor_pct`` (when set) widens sub-floor stops relative to it before
+    validation and sizing, so risk is normalized off the floored distance.
     """
     direction = map_direction(alert.get("direction", ""))
     if direction is None or paper_equity <= 0 or entry_price <= 0:
@@ -243,6 +408,8 @@ def plan_entry(
         return None
 
     stop_price = compute_stop(direction, signal_high, signal_low, stop_buffer_pct)
+    if stop_floor_pct is not None and stop_floor_pct > 0:
+        stop_price = apply_stop_floor(direction, entry_price, stop_price, stop_floor_pct)
 
     if direction == Direction.LONG and stop_price >= entry_price:
         return None

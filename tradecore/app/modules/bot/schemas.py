@@ -40,6 +40,18 @@ class CloseReason(str, Enum):
     MANUAL = "manual"
     KILL_SWITCH = "kill_switch"
     MAX_HOLD = "max_hold"
+    EXPIRED = "expired"  # pending limit order cancelled unfilled (v2 retrace)
+
+
+@dataclass(frozen=True)
+class TrailState:
+    """Mutable-per-bar trail bookkeeping for partial_trail exits, carried
+    between monitor ticks via bot_trades columns (stop_price / peak_price /
+    partial_exit_at). Immutable so strategy.step_trail_bar stays pure."""
+
+    stop: Decimal
+    peak: Decimal
+    partial_taken: bool
 
 
 @dataclass(frozen=True)

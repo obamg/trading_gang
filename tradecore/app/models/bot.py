@@ -2,9 +2,12 @@
 
 Two tables:
 
-  bot_trades             One row per opened paper trade. Lifecycle:
-                         status=open → close_reason set + close_price + closed_at +
-                         realized_pnl_usd → status=closed.
+  bot_trades             One row per paper trade. Lifecycle:
+                         chase entry:   status=open → status=closed
+                         retrace entry: status=pending → open (limit filled) → closed,
+                                        or pending → cancelled (expired unfilled).
+                         Close sets close_reason + close_price + closed_at +
+                         realized_pnl_usd.
 
   bot_skipped_signals    One row per ``wave_active`` alert that the bot saw but
                          did not act on. Critical for tuning: without this we
@@ -61,6 +64,20 @@ class BotTrade(Base):
     vol_ratio: Mapped[Decimal | None] = mapped_column(Numeric(8, 3), nullable=True)
     funding_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 5), nullable=True)
     pct_change: Mapped[Decimal | None] = mapped_column(Numeric(8, 5), nullable=True)
+
+    # V2 retrace/partial-trail fields — null on v1 (chase / fixed_tp) rows.
+    entry_mode: Mapped[str | None] = mapped_column(String(10), nullable=True)  # chase | retrace
+    limit_price: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    expire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Stop at entry, frozen — stop_price ratchets under partial_trail, and R
+    # must always be measured against the risk taken at entry.
+    initial_stop_price: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    peak_price: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    partial_exit_price: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    partial_exit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    partial_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
+    # qty stays the ORIGINAL total; partial_qty is the closed portion.
+    partial_qty: Mapped[Decimal | None] = mapped_column(Numeric(40, 18), nullable=True)
 
     status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="open")
 

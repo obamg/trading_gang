@@ -155,6 +155,18 @@ def compose_report(stats: dict) -> str:
         ),
     ]
 
+    # V2 retrace orders — only rendered when the loader provides the counts,
+    # so pre-v2 aggregates (and their tests) keep composing unchanged.
+    orders = stats.get("orders")
+    if orders:
+        fill_rate = orders.get("fill_rate")
+        rate_s = f"{100.0 * fill_rate:.0f}%" if fill_rate is not None else "—"
+        lines.append(
+            f"Orders: pending `{int(orders.get('pending') or 0)}` | "
+            f"cancelled `{int(orders.get('cancelled') or 0)}` | "
+            f"fill rate `{rate_s}`"
+        )
+
     total_skips = sum(skips.values())
     lines += ["", f"*Skipped signals* (`{total_skips}` since era start)"]
     for reason in NEW_FILTER_REASONS:
@@ -214,6 +226,33 @@ async def _load_stats(since: datetime) -> dict:
                 .group_by(BotSkippedSignal.skip_reason)
             )
         ).all()
+        # V2 retrace-order accounting: fill rate over resolved limits since the
+        # window start (pending is a point-in-time count, not window-bound).
+        pending_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(BotTrade)
+                .where(BotTrade.status == "pending")
+            )
+        ).scalar_one()
+        cancelled_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(BotTrade)
+                .where(BotTrade.status == "cancelled", BotTrade.entry_at >= since)
+            )
+        ).scalar_one()
+        filled_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(BotTrade)
+                .where(
+                    BotTrade.status.in_(("open", "closed")),
+                    BotTrade.entry_mode == "retrace",
+                    BotTrade.entry_at >= since,
+                )
+            )
+        ).scalar_one()
 
     trades = [
         {
@@ -229,6 +268,13 @@ async def _load_stats(since: datetime) -> dict:
     stats = aggregate_trades(trades)
     stats["open_positions"] = int(open_count)
     stats["skips"] = {reason: int(count) for reason, count in skip_rows}
+    resolved = int(filled_count) + int(cancelled_count)
+    stats["orders"] = {
+        "pending": int(pending_count),
+        "cancelled": int(cancelled_count),
+        "filled": int(filled_count),
+        "fill_rate": (int(filled_count) / resolved) if resolved else None,
+    }
     stats["since"] = since.isoformat()
     return stats
 

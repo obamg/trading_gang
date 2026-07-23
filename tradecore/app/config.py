@@ -196,6 +196,18 @@ class Settings(BaseSettings):
     bot_monitor_tick_seconds: int = 30           # how often to check open positions for stop/TP
     bot_live_enabled: bool = False               # v2: when true, route fills to a real exchange
     bot_live_leverage: int = 5                   # v2: isolated leverage on Bybit perps
+    # V2 — retrace LIMIT entry + partial-trail exit (replay evidence: chase-market
+    # entries at the cascade close are structurally late; fixed 2R TP is negative
+    # under every entry). Code defaults keep v1 behaviour; prod flips via compose.
+    bot_entry_mode: str = "chase"                # chase | retrace (limit at a pullback into the signal bar)
+    bot_retrace_depth: float = 0.5               # limit = ref − depth × signal-bar range (long; mirror short)
+    bot_retrace_window_bars: int = 12            # 5m bars an unfilled limit stays working before cancel
+    bot_min_stop_distance_pct: float = 0.015     # floor on |entry−stop|/entry, both entry modes. 0 disables.
+    bot_exit_mode: str = "fixed_tp"              # fixed_tp | partial_trail
+    bot_partial_take_r: float = 1.5              # partial-trail: close bot_partial_fraction at this R
+    bot_partial_fraction: float = 0.5            # fraction of qty closed at the partial target
+    bot_trail_arm_r: float = 1.0                 # favorable excursion (in R) that arms the runner trail
+    bot_trail_distance_r: float = 1.0            # trail distance behind the peak, in R
 
     @property
     def is_production(self) -> bool:
