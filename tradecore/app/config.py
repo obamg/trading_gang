@@ -209,6 +209,27 @@ class Settings(BaseSettings):
     bot_trail_arm_r: float = 1.0                 # favorable excursion (in R) that arms the runner trail
     bot_trail_distance_r: float = 1.0            # trail distance behind the peak, in R
 
+    # MajorsBot — independent paper bot on a FIXED majors universe (Bybit linear
+    # perps, self-computed 1h-bar signals; no alerts). Strategy parameters
+    # (thresholds, retrace depth, trail distances) are frozen in
+    # app/modules/majorsbot/strategies.py to mirror the 12-month bake-off —
+    # only operational knobs live here. Defaults keep it off.
+    majorsbot_enabled: bool = False
+    majorsbot_symbols: str = (
+        "BTCUSDT,ETHUSDT,XRPUSDT,BNBUSDT,SOLUSDT,"
+        "DOGEUSDT,ADAUSDT,TRXUSDT,LINKUSDT,AVAXUSDT"
+    )
+    majorsbot_paper_equity_initial: float = 10_000.0
+    majorsbot_risk_per_trade_pct: float = 0.0025   # equity fraction at risk per trade
+    majorsbot_position_size_pct: float = 0.05      # notional cap per trade (fraction of equity)
+    majorsbot_max_concurrent: int = 6              # open positions across both strategies
+    majorsbot_volevent_enabled: bool = True        # F4-A: vol-event momentum retrace
+    majorsbot_fundingfade_enabled: bool = True     # F1-B: funding-extreme fade (99th pctile)
+    majorsbot_maker_fee_pct: float = 0.0002        # limit entries + limit partial TPs
+    majorsbot_taker_fee_pct: float = 0.0006        # market entries + market-style exits
+    majorsbot_slippage_pct: float = 0.0002         # adverse slip on market-style exits only
+    majorsbot_max_hold_hours: int = 168            # safety force-close. 0 disables.
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
