@@ -48,6 +48,7 @@ from app.modules.listingwatch.router import router as listingwatch_router
 from app.modules.awakening.router import router as awakening_router
 from app.modules.wavewatch.router import router as wavewatch_router
 from app.modules.bot.router import router as bot_router
+from app.modules.majorsbot.router import router as majorsbot_router
 from app.services import redis_service
 from app.services.binance_stream import manager as binance_manager
 from app.services.bybit_stream import manager as bybit_manager
@@ -267,6 +268,7 @@ app.include_router(listingwatch_router)
 app.include_router(awakening_router)
 app.include_router(wavewatch_router)
 app.include_router(bot_router)
+app.include_router(majorsbot_router)
 
 
 @app.get("/health")
