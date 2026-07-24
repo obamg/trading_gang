@@ -320,8 +320,8 @@ async def _load_majorsbot_stats(since: datetime) -> dict:
     from app.database import AsyncSessionLocal
     from app.models.majorsbot import MajorsBotTrade
 
-    per: dict[str, dict] = {
-        name: {
+    def _empty() -> dict:
+        return {
             "signals": 0,
             "filled": 0,
             "pending": 0,
@@ -330,8 +330,8 @@ async def _load_majorsbot_stats(since: datetime) -> dict:
             "avg_r_net": None,
             "total_r_net": None,
         }
-        for name in MAJORSBOT_STRATEGIES
-    }
+
+    per: dict[str, dict] = {name: _empty() for name in MAJORSBOT_STRATEGIES}
     async with AsyncSessionLocal() as db:
         sig_rows = (
             await db.execute(
@@ -377,17 +377,17 @@ async def _load_majorsbot_stats(since: datetime) -> dict:
         ).all()
 
     for strat, n in sig_rows:
-        per.setdefault(strat, dict(per[MAJORSBOT_STRATEGIES[0]]))["signals"] = int(n)
+        per.setdefault(strat, _empty())["signals"] = int(n)
     for strat, status_val, n in status_rows:
-        b = per.setdefault(strat, dict(per[MAJORSBOT_STRATEGIES[0]]))
+        b = per.setdefault(strat, _empty())
         if status_val in ("open", "closed"):
             b["filled"] += int(n)
         elif status_val == "cancelled":
             b["cancelled"] += int(n)
     for strat, n in pending_now_rows:
-        per.setdefault(strat, dict(per[MAJORSBOT_STRATEGIES[0]]))["pending"] = int(n)
+        per.setdefault(strat, _empty())["pending"] = int(n)
     for strat, n, r_net_sum in closed_rows:
-        b = per.setdefault(strat, dict(per[MAJORSBOT_STRATEGIES[0]]))
+        b = per.setdefault(strat, _empty())
         b["closed"] = int(n)
         b["total_r_net"] = float(r_net_sum or 0)
         b["avg_r_net"] = (float(r_net_sum or 0) / int(n)) if int(n) else None
