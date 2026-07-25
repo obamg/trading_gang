@@ -14,6 +14,7 @@ import {
   Sparkles,
   Waves,
   Bot,
+  Coins,
   type LucideIcon,
 } from "lucide-react";
 import type { ModuleKey } from "@/types/alerts";
@@ -42,6 +43,7 @@ export const MODULES: ModuleDef[] = [
   { key: "listingwatch", label: "ListingWatch", path: "/listings", color: "#EC4899", icon: Sparkles },
   { key: "wavewatch", label: "WaveWatch", path: "/wavewatch", color: "#0EA5E9", icon: Waves },
   { key: "bot", label: "WaveBot", path: "/bot", color: "#84CC16", icon: Bot },
+  { key: "majorsbot", label: "MajorsBot", path: "/majorsbot", color: "#D946EF", icon: Coins },
 ];
 
 export const MODULE_BY_KEY: Record<ModuleKey, ModuleDef> = Object.fromEntries(

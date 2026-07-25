@@ -87,14 +87,15 @@ async def trades(
     db: DBSession,
     symbol: str | None = Query(default=None),
     reason: str | None = Query(default=None),
+    status: str = Query(default="closed"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    stmt = (
-        select(BotTrade)
-        .where(BotTrade.status == "closed")
-        .order_by(desc(BotTrade.closed_at))
+    stmt = select(BotTrade).order_by(
+        desc(func.coalesce(BotTrade.closed_at, BotTrade.entry_at))
     )
+    if status and status != "all":
+        stmt = stmt.where(BotTrade.status == status)
     if symbol:
         stmt = stmt.where(BotTrade.symbol == symbol)
     if reason:
