@@ -32,9 +32,17 @@ const SKIP_REASONS = [
   "no_equity",
   "invalid_direction",
   "exchange_unsupported",
+  "not_perp",
+  "symbol_blocked",
+  "low_turnover",
+  "direction_disabled",
+  "max_open_risk",
+  "low_vol_ratio",
+  "funding_extreme",
+  "blocked_hour",
 ] as const;
 
-type TabKey = "open" | "closed" | "skipped" | "equity" | "analytics";
+type TabKey = "open" | "pending" | "closed" | "skipped" | "equity" | "analytics";
 
 export default function WaveBotPage() {
   const [tab, setTab] = useState<TabKey>("open");
@@ -52,7 +60,7 @@ export default function WaveBotPage() {
           <h1 className="text-lg font-semibold md:text-2xl">WaveBot</h1>
           <p className="text-sm text-textSecondary">
             Paper trading on <span className="text-textPrimary">wave_active</span> signals.
-            5% notional, 2R, max 5 concurrent.
+            v2: retrace limit entries, partial at 1.5R, trailed runner.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -97,7 +105,8 @@ export default function WaveBotPage() {
           <Tabs
             tabs={[
               { key: "open", label: "Open positions" },
-              { key: "closed", label: "Closed trades" },
+              { key: "pending", label: "Pending orders" },
+              { key: "closed", label: "History" },
               { key: "skipped", label: "Skipped signals" },
               { key: "equity", label: "Equity curve" },
               { key: "analytics", label: "Analytics" },
@@ -108,6 +117,7 @@ export default function WaveBotPage() {
         </CardHeader>
         <CardBody className="p-0">
           {tab === "open" && <OpenPositionsTab />}
+          {tab === "pending" && <PendingOrdersTab />}
           {tab === "closed" && <ClosedTradesTab />}
           {tab === "skipped" && <SkippedTab />}
           {tab === "equity" && <EquityCurveTab />}
@@ -170,19 +180,18 @@ function OpenPositionsTab() {
       key: "stop",
       header: "Stop",
       align: "right",
-      accessor: (r) => (
-        <span className="text-loss">
-          <NumberDisplay value={r.stop_price} decimals={5} />
-        </span>
-      ),
+      accessor: (r) => <StopCell trade={r} />,
     },
     {
       key: "tp",
       header: "Take profit",
       align: "right",
       accessor: (r) => (
-        <span className="text-bullish">
-          <NumberDisplay value={r.take_profit_price} decimals={5} />
+        <span className="inline-flex items-center justify-end gap-1">
+          {r.partial_exit_at ? <PartialChip trade={r} /> : null}
+          <span className="text-bullish">
+            <NumberDisplay value={r.take_profit_price} decimals={5} />
+          </span>
         </span>
       ),
     },
@@ -215,29 +224,104 @@ function OpenPositionsTab() {
   return <Table columns={cols} rows={rows} rowKey={(r) => r.id} emptyMessage="No open positions." />;
 }
 
+// ---------- pending orders tab (v2 retrace limits) ----------
+
+function PendingOrdersTab() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["bot", "trades", { status: "pending" }],
+    queryFn: () => botApi.trades({ status: "pending", limit: 100 }),
+    refetchInterval: 10_000,
+  });
+  // Guard on the row status: only actual pending limits belong here.
+  const rows = (data?.items ?? []).filter((t) => t.status === "pending");
+
+  if (isLoading) return <Skeleton className="m-4 h-48" />;
+
+  const cols: Column<BotTrade>[] = [
+    { key: "symbol", header: "Symbol", accessor: (r) => <SymbolCell symbol={r.symbol} exchange={r.exchange} /> },
+    { key: "dir", header: "Side", accessor: (r) => <DirectionBadge dir={r.direction} /> },
+    {
+      key: "mode",
+      header: "Entry",
+      accessor: (r) => <Badge variant="neutral">{r.entry_mode ?? "retrace"}</Badge>,
+    },
+    {
+      key: "limit",
+      header: "Limit price",
+      align: "right",
+      accessor: (r) => <NumberDisplay value={r.limit_price ?? r.entry_price} decimals={5} />,
+    },
+    {
+      key: "stop",
+      header: "Stop",
+      align: "right",
+      accessor: (r) => (
+        <span className="text-loss">
+          <NumberDisplay value={r.stop_price} decimals={5} />
+        </span>
+      ),
+    },
+    {
+      key: "notional",
+      header: "Notional",
+      align: "right",
+      accessor: (r) => <NumberDisplay value={r.notional_usd} decimals={2} prefix="$" />,
+    },
+    {
+      key: "placed",
+      header: "Placed",
+      accessor: (r) => <RelTime iso={r.entry_at} />,
+    },
+    {
+      key: "expires",
+      header: "Expires",
+      accessor: (r) => <RelTime iso={r.expire_at} />,
+    },
+  ];
+  return (
+    <Table
+      columns={cols}
+      rows={rows}
+      rowKey={(r) => r.id}
+      emptyMessage="No pending limit orders."
+    />
+  );
+}
+
 // ---------- closed trades tab ----------
 
 function ClosedTradesTab() {
   const [symbol, setSymbol] = useState("");
   const [reason, setReason] = useState("");
+  const [status, setStatus] = useState<"closed" | "cancelled" | "all">("closed");
   const { data, isLoading } = useQuery({
-    queryKey: ["bot", "trades", { symbol, reason }],
+    queryKey: ["bot", "trades", { symbol, reason, status }],
     queryFn: () =>
       botApi.trades({
         symbol: symbol || undefined,
         reason: reason || undefined,
+        status,
         limit: 200,
       }),
     refetchInterval: 30_000,
   });
-  const rows = data?.items ?? [];
-
-  const totalPnl = useMemo(
-    () => rows.reduce((s, r) => s + (r.realized_pnl_usd ?? 0), 0),
-    [rows],
+  // Guard on row status so a backend that ignores the param can't leak
+  // closed rows into the cancelled view.
+  const rows = useMemo(
+    () =>
+      (data?.items ?? []).filter((t) =>
+        status === "all" ? t.status === "closed" || t.status === "cancelled" : t.status === status,
+      ),
+    [data, status],
   );
-  const wins = rows.filter((r) => (r.realized_pnl_usd ?? 0) > 0).length;
-  const winRate = rows.length > 0 ? wins / rows.length : 0;
+
+  const closedRows = useMemo(() => rows.filter((r) => r.status === "closed"), [rows]);
+  const totalPnl = useMemo(
+    () => closedRows.reduce((s, r) => s + (r.realized_pnl_usd ?? 0), 0),
+    [closedRows],
+  );
+  const wins = closedRows.filter((r) => (r.realized_pnl_usd ?? 0) > 0).length;
+  const winRate = closedRows.length > 0 ? wins / closedRows.length : 0;
 
   const cols: Column<BotTrade>[] = [
     { key: "symbol", header: "Symbol", accessor: (r) => <SymbolCell symbol={r.symbol} exchange={r.exchange} /> },
@@ -246,13 +330,18 @@ function ClosedTradesTab() {
       key: "entry",
       header: "Entry",
       align: "right",
-      accessor: (r) => <NumberDisplay value={r.entry_price} decimals={5} />,
+      accessor: (r) => (
+        <span className="inline-flex items-center justify-end gap-1">
+          {r.partial_exit_at ? <PartialChip trade={r} /> : null}
+          <NumberDisplay value={r.entry_price} decimals={5} />
+        </span>
+      ),
     },
     {
       key: "exit",
       header: "Exit",
       align: "right",
-      accessor: (r) => <NumberDisplay value={r.close_price ?? 0} decimals={5} />,
+      accessor: (r) => <NumberDisplay value={r.close_price} decimals={5} />,
     },
     {
       key: "reason",
@@ -263,21 +352,40 @@ function ClosedTradesTab() {
       key: "pnl",
       header: "P&L",
       align: "right",
-      accessor: (r) => (
-        <span className={(r.realized_pnl_usd ?? 0) >= 0 ? "text-bullish" : "text-loss"}>
-          <NumberDisplay value={r.realized_pnl_usd ?? 0} decimals={2} prefix="$" />
-        </span>
-      ),
+      accessor: (r) =>
+        r.realized_pnl_usd === null ? (
+          <span className="text-textMuted">—</span>
+        ) : (
+          <span className={r.realized_pnl_usd >= 0 ? "text-bullish" : "text-loss"}>
+            <NumberDisplay value={r.realized_pnl_usd} decimals={2} prefix="$" />
+          </span>
+        ),
     },
     {
       key: "r",
       header: "R",
       align: "right",
-      accessor: (r) => (
-        <span className={(r.realized_r ?? 0) >= 0 ? "text-bullish" : "text-loss"}>
-          {(r.realized_r ?? 0).toFixed(2)}R
-        </span>
-      ),
+      accessor: (r) =>
+        r.realized_r === null ? (
+          <span className="text-textMuted">—</span>
+        ) : (
+          <span className={r.realized_r >= 0 ? "text-bullish" : "text-loss"}>
+            {r.realized_r.toFixed(2)}R
+          </span>
+        ),
+    },
+    {
+      key: "rnet",
+      header: "Net R",
+      align: "right",
+      accessor: (r) =>
+        r.realized_r_net === null ? (
+          <span className="text-textMuted">—</span>
+        ) : (
+          <span className={r.realized_r_net >= 0 ? "text-bullish" : "text-loss"}>
+            {r.realized_r_net.toFixed(2)}R
+          </span>
+        ),
     },
     {
       key: "closed",
@@ -291,6 +399,14 @@ function ClosedTradesTab() {
       <div className="flex flex-wrap items-center gap-3 border-b border-borderSubtle px-4 py-3 text-sm">
         <div className="flex items-center gap-2">
           <span className="text-textMuted">Filter:</span>
+          <Select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as "closed" | "cancelled" | "all")}
+          >
+            <option value="closed">closed</option>
+            <option value="cancelled">cancelled</option>
+            <option value="all">all</option>
+          </Select>
           <input
             placeholder="symbol"
             value={symbol}
@@ -303,6 +419,8 @@ function ClosedTradesTab() {
             <option value="tp">tp</option>
             <option value="manual">manual</option>
             <option value="kill_switch">kill_switch</option>
+            <option value="max_hold">max_hold</option>
+            <option value="expired">expired</option>
           </Select>
         </div>
         <div className="ml-auto flex gap-4">
@@ -315,14 +433,21 @@ function ClosedTradesTab() {
           <span>
             <span className="text-textMuted">Win rate: </span>
             <span className="text-textPrimary">{(winRate * 100).toFixed(0)}%</span>
-            <span className="text-textMuted text-xs"> ({wins}/{rows.length})</span>
+            <span className="text-textMuted text-xs"> ({wins}/{closedRows.length})</span>
           </span>
         </div>
       </div>
       {isLoading ? (
         <Skeleton className="m-4 h-48" />
       ) : (
-        <Table columns={cols} rows={rows} rowKey={(r) => r.id} emptyMessage="No closed trades yet." />
+        <Table
+          columns={cols}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyMessage={
+            status === "cancelled" ? "No cancelled orders yet." : "No closed trades yet."
+          }
+        />
       )}
     </div>
   );
@@ -511,6 +636,49 @@ function DirectionBadge({ dir }: { dir: string }) {
   return <span className="text-textMuted">{dir}</span>;
 }
 
+function StopCell({ trade }: { trade: BotTrade }) {
+  const trailing =
+    trade.initial_stop_price !== null && trade.stop_price !== trade.initial_stop_price;
+  return (
+    <span
+      className="inline-flex items-center justify-end gap-1"
+      title={
+        trailing
+          ? `Trailing — initial stop ${trade.initial_stop_price}` +
+            (trade.peak_price !== null ? `, peak ${trade.peak_price}` : "")
+          : undefined
+      }
+    >
+      {trailing ? (
+        <span className="rounded bg-bgSecondary px-1 text-[10px] uppercase tracking-wide text-textMuted">
+          trail
+        </span>
+      ) : null}
+      <span className="text-loss">
+        <NumberDisplay value={trade.stop_price} decimals={5} />
+      </span>
+    </span>
+  );
+}
+
+function PartialChip({ trade }: { trade: BotTrade }) {
+  const pnl = trade.partial_pnl_usd;
+  return (
+    <span
+      className="rounded bg-bgSecondary px-1 text-[10px] uppercase tracking-wide text-textMuted"
+      title={
+        `Partial taken` +
+        (trade.partial_exit_price !== null ? ` @ ${trade.partial_exit_price}` : "") +
+        (trade.partial_qty !== null ? `, qty ${trade.partial_qty}` : "") +
+        (pnl !== null ? `, P&L $${pnl.toFixed(2)}` : "") +
+        (trade.partial_exit_at ? ` (${new Date(trade.partial_exit_at).toLocaleString()})` : "")
+      }
+    >
+      ½
+    </span>
+  );
+}
+
 function CloseReasonBadge({ reason }: { reason: string | null }) {
   if (!reason) return <span className="text-textMuted">—</span>;
   const variant =
@@ -528,11 +696,14 @@ function RelTime({ iso }: { iso: string | null }) {
   if (!iso) return <span className="text-textMuted">—</span>;
   const d = new Date(iso);
   const sec = Math.floor((Date.now() - d.getTime()) / 1000);
-  let txt: string;
-  if (sec < 60) txt = `${sec}s ago`;
-  else if (sec < 3600) txt = `${Math.floor(sec / 60)}m ago`;
-  else if (sec < 86400) txt = `${Math.floor(sec / 3600)}h ago`;
-  else txt = `${Math.floor(sec / 86400)}d ago`;
+  const abs = Math.abs(sec);
+  let span: string;
+  if (abs < 60) span = `${abs}s`;
+  else if (abs < 3600) span = `${Math.floor(abs / 60)}m`;
+  else if (abs < 86400) span = `${Math.floor(abs / 3600)}h`;
+  else span = `${Math.floor(abs / 86400)}d`;
+  // Future timestamps (e.g. a pending limit's expire_at) render as "in Xm".
+  const txt = sec >= 0 ? `${span} ago` : `in ${span}`;
   return (
     <span className="text-xs text-textSecondary" title={d.toLocaleString()}>
       {txt}
@@ -634,6 +805,18 @@ function AnalyticsSection({
       ),
     },
     {
+      key: "rnet",
+      header: "Σ Rnet",
+      accessor: (r) => (
+        <span
+          className={`tabular-nums ${r.realized_r_net > 0 ? "text-bullish" : r.realized_r_net < 0 ? "text-bearish" : ""}`}
+        >
+          {r.realized_r_net >= 0 ? "+" : ""}
+          {r.realized_r_net.toFixed(2)}
+        </span>
+      ),
+    },
+    {
       key: "exp",
       header: "E[R]/trade",
       accessor: (r) =>
@@ -645,6 +828,21 @@ function AnalyticsSection({
           >
             {r.expectancy_r >= 0 ? "+" : ""}
             {r.expectancy_r.toFixed(3)}
+          </span>
+        ),
+    },
+    {
+      key: "expnet",
+      header: "E[Rnet]/trade",
+      accessor: (r) =>
+        r.expectancy_r_net == null ? (
+          <span className="text-textSecondary">—</span>
+        ) : (
+          <span
+            className={`tabular-nums ${r.expectancy_r_net > 0 ? "text-bullish" : r.expectancy_r_net < 0 ? "text-bearish" : ""}`}
+          >
+            {r.expectancy_r_net >= 0 ? "+" : ""}
+            {r.expectancy_r_net.toFixed(3)}
           </span>
         ),
     },
