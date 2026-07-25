@@ -47,6 +47,12 @@ MIN_SAMPLE_FOR_VERDICT = 30
 MAX_MESSAGE_CHARS = 3500
 _MAX_OTHER_SKIP_LINES = 8
 
+# Telegram hard limit is 4096 — the combined WaveBot + MajorsBot message gets
+# its own, slightly larger budget (compose_report already self-caps at 3500).
+MAX_COMBINED_CHARS = 4000
+
+MAJORSBOT_STRATEGIES = ("volevent", "fundingfade")
+
 
 # ---------- pure aggregation ----------
 
@@ -189,6 +195,33 @@ def compose_report(stats: dict) -> str:
     return text
 
 
+def compose_majorsbot_section(mb: dict) -> str:
+    """Render the MajorsBot per-strategy aggregates. Pure, like compose_report.
+
+    mb = {"equity": float | None, "open": int, "per_strategy": {name: {
+        "signals", "filled", "pending", "cancelled", "closed",
+        "avg_r_net" (None when no closed), "total_r_net"}}}
+    """
+    per = mb.get("per_strategy") or {}
+    eq = mb.get("equity")
+    eq_s = f"`${eq:,.2f}`" if eq is not None else "`—`"
+    lines = [
+        "📊 *MajorsBot — majors paper bot*",
+        f"Equity {eq_s} | Open now: `{int(mb.get('open') or 0)}`",
+        "`strat        sig fill pend canc clsd  netR   totR`",
+    ]
+    for name in MAJORSBOT_STRATEGIES:
+        b = per.get(name) or {}
+        avg = f"{b['avg_r_net']:+6.3f}" if b.get("avg_r_net") is not None else "     —"
+        tot = f"{b['total_r_net']:+6.2f}" if b.get("total_r_net") is not None else "     —"
+        lines.append(
+            f"`{name:<11} {int(b.get('signals') or 0):>4} {int(b.get('filled') or 0):>4} "
+            f"{int(b.get('pending') or 0):>4} {int(b.get('cancelled') or 0):>4} "
+            f"{int(b.get('closed') or 0):>4} {avg} {tot}`"
+        )
+    return "\n".join(lines)
+
+
 # ---------- DB loading ----------
 
 
@@ -279,6 +312,97 @@ async def _load_stats(since: datetime) -> dict:
     return stats
 
 
+async def _load_majorsbot_stats(since: datetime) -> dict:
+    """Query majorsbot_trades per strategy: signals (rows created), fills,
+    pending (point-in-time), cancellations, closed n + net-R stats, equity."""
+    from sqlalchemy import func, select
+
+    from app.database import AsyncSessionLocal
+    from app.models.majorsbot import MajorsBotTrade
+
+    def _empty() -> dict:
+        return {
+            "signals": 0,
+            "filled": 0,
+            "pending": 0,
+            "cancelled": 0,
+            "closed": 0,
+            "avg_r_net": None,
+            "total_r_net": None,
+        }
+
+    per: dict[str, dict] = {name: _empty() for name in MAJORSBOT_STRATEGIES}
+    async with AsyncSessionLocal() as db:
+        sig_rows = (
+            await db.execute(
+                select(MajorsBotTrade.strategy, func.count())
+                .where(MajorsBotTrade.created_at >= since)
+                .group_by(MajorsBotTrade.strategy)
+            )
+        ).all()
+        status_rows = (
+            await db.execute(
+                select(MajorsBotTrade.strategy, MajorsBotTrade.status, func.count())
+                .where(MajorsBotTrade.created_at >= since)
+                .group_by(MajorsBotTrade.strategy, MajorsBotTrade.status)
+            )
+        ).all()
+        closed_rows = (
+            await db.execute(
+                select(
+                    MajorsBotTrade.strategy,
+                    func.count(),
+                    func.coalesce(func.sum(MajorsBotTrade.realized_r_net), 0),
+                )
+                .where(
+                    MajorsBotTrade.status == "closed",
+                    MajorsBotTrade.created_at >= since,
+                )
+                .group_by(MajorsBotTrade.strategy)
+            )
+        ).all()
+        open_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(MajorsBotTrade)
+                .where(MajorsBotTrade.status == "open")
+            )
+        ).scalar_one()
+        pending_now_rows = (
+            await db.execute(
+                select(MajorsBotTrade.strategy, func.count())
+                .where(MajorsBotTrade.status == "pending")
+                .group_by(MajorsBotTrade.strategy)
+            )
+        ).all()
+
+    for strat, n in sig_rows:
+        per.setdefault(strat, _empty())["signals"] = int(n)
+    for strat, status_val, n in status_rows:
+        b = per.setdefault(strat, _empty())
+        if status_val in ("open", "closed"):
+            b["filled"] += int(n)
+        elif status_val == "cancelled":
+            b["cancelled"] += int(n)
+    for strat, n in pending_now_rows:
+        per.setdefault(strat, _empty())["pending"] = int(n)
+    for strat, n, r_net_sum in closed_rows:
+        b = per.setdefault(strat, _empty())
+        b["closed"] = int(n)
+        b["total_r_net"] = float(r_net_sum or 0)
+        b["avg_r_net"] = (float(r_net_sum or 0) / int(n)) if int(n) else None
+
+    equity_val = None
+    try:
+        from app.modules.majorsbot import equity as mb_equity
+
+        equity_val = float(await mb_equity.get_paper_equity())
+    except Exception as e:  # Redis down must not sink the report
+        log.warning("forward_report_majorsbot_equity_failed", error=str(e))
+
+    return {"equity": equity_val, "open": int(open_count), "per_strategy": per}
+
+
 # ---------- delivery ----------
 
 
@@ -334,6 +458,15 @@ async def _run(args: argparse.Namespace) -> None:
 
     stats = await _load_stats(since)
     text = compose_report(stats)
+    # MajorsBot section rides the same message; its failure must never break
+    # the WaveBot report.
+    try:
+        mb_stats = await _load_majorsbot_stats(since)
+        text = text + "\n\n" + compose_majorsbot_section(mb_stats)
+        if len(text) > MAX_COMBINED_CHARS:
+            text = text[: MAX_COMBINED_CHARS - 1] + "…"
+    except Exception as e:
+        log.warning("forward_report_majorsbot_failed", error=str(e))
     overall = stats["overall"]
     log.info(
         "forward_report_composed",

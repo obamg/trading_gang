@@ -27,6 +27,7 @@ from app.modules.walletwatch import detector as walletwatch_detector
 from app.modules.walletwatch.discovery import engine as discovery_engine
 from app.modules.walletwatch.discovery import promote as discovery_promote
 from app.modules.bot import monitor as bot_monitor
+from app.modules.majorsbot import engine as majorsbot_engine
 from app.modules.listingwatch import detector as listingwatch_detector
 from app.modules.listingwatch import watcher as listingwatch_watcher
 from app.modules.awakening import detector as awakening_detector
@@ -274,6 +275,16 @@ def start_scheduler() -> AsyncIOScheduler:
         hour=0,
         minute=0,
         id="bot_daily_anchor",
+        coalesce=True,
+        max_instances=1,
+    )
+    # MajorsBot — fixed-universe 1h-bar paper bot. The tick itself gates on
+    # majorsbot_enabled and swallows per-symbol + top-level exceptions.
+    sched.add_job(
+        majorsbot_engine.run_majorsbot_tick,
+        "interval",
+        minutes=5,
+        id="majorsbot_tick",
         coalesce=True,
         max_instances=1,
     )
