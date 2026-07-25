@@ -540,9 +540,23 @@ export const wavewatchApi = {
 // ---------- WaveBot ----------
 export interface BotConfig {
   position_size_pct: number;
+  risk_per_trade_pct: number;
   r_multiple: number;
   stop_buffer_pct: number;
   per_symbol_cooldown_minutes: number;
+  max_hold_hours: number;
+  fee_pct_per_side: number;
+  slippage_pct: number;
+  funding_interval_hours: number;
+  long_enabled: boolean;
+  short_enabled: boolean;
+  max_open_risk_pct: number;
+  loss_throttle_stops: number;
+  loss_throttle_factor: number;
+  max_turnover_notional_pct: number;
+  perp_only: boolean;
+  symbol_blocklist: string[];
+  min_turnover_usd: number;
   daily_drawdown_cap_pct: number;
   oracle_veto_long_below: number;
   oracle_veto_short_above: number;
@@ -578,14 +592,28 @@ export interface BotTrade {
   paper_equity_at_entry: number;
   close_price: number | null;
   closed_at: string | null;
-  close_reason: "stop" | "tp" | "manual" | "kill_switch" | null;
+  close_reason: "stop" | "tp" | "manual" | "kill_switch" | "max_hold" | "expired" | null;
   realized_pnl_usd: number | null;
   realized_r: number | null;
+  realized_r_net: number | null;
+  fees_usd: number | null;
+  funding_pnl_usd: number | null;
+  entry_turnover_usd: number | null;
   oracle_score_at_entry: number | null;
   vol_ratio: number | null;
   funding_pct: number | null;
   pct_change: number | null;
-  status: "open" | "closed";
+  // v2 retrace-limit state machine (all null on v1 chase rows)
+  entry_mode: "chase" | "retrace" | null;
+  limit_price: number | null;
+  expire_at: string | null;
+  initial_stop_price: number | null;
+  peak_price: number | null;
+  partial_exit_price: number | null;
+  partial_exit_at: string | null;
+  partial_pnl_usd: number | null;
+  partial_qty: number | null;
+  status: "pending" | "open" | "closed" | "cancelled";
 }
 export interface BotSkippedSignal {
   id: string;
@@ -612,7 +640,9 @@ export interface BotAnalyticsRow {
   win_rate: number | null;
   realized_pnl_usd: number;
   realized_r: number;
+  realized_r_net: number;
   expectancy_r: number | null;
+  expectancy_r_net: number | null;
 }
 export interface BotAnalytics {
   days: number;
@@ -625,7 +655,16 @@ export const botApi = {
   status: () => http.get<BotStatus>("/bot/status").then((r) => r.data),
   positions: () =>
     http.get<{ items: BotTrade[] }>("/bot/positions").then((r) => r.data),
-  trades: (params?: { symbol?: string; reason?: string; limit?: number; offset?: number }) =>
+  // NOTE: the backend currently serves closed rows only from /bot/trades;
+  // `status` is sent for forward-compatibility and page code must still guard
+  // on the returned rows' `status` field.
+  trades: (params?: {
+    symbol?: string;
+    reason?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) =>
     http
       .get<{ items: BotTrade[]; limit: number; offset: number }>("/bot/trades", { params })
       .then((r) => r.data),
@@ -645,4 +684,104 @@ export const botApi = {
     http.post<{ ok: boolean; id: string; close_price: number }>(`/bot/close/${id}`).then((r) => r.data),
   resetPaper: () =>
     http.post<{ ok: boolean; paper_equity: number }>("/bot/reset-paper").then((r) => r.data),
+};
+
+// ---------- MajorsBot ----------
+export type MajorsBotStrategy = "volevent" | "fundingfade";
+export interface MajorsBotConfig {
+  symbols: string[];
+  volevent_enabled: boolean;
+  fundingfade_enabled: boolean;
+  paper_equity_initial: number;
+  risk_per_trade_pct: number;
+  position_size_pct: number;
+  maker_fee_pct: number;
+  taker_fee_pct: number;
+  slippage_pct: number;
+  max_hold_hours: number;
+}
+export interface MajorsBotStatus {
+  enabled: boolean;
+  paper_equity: number;
+  open_positions: number;
+  pending_orders: number;
+  concurrent_count: number;
+  max_concurrent: number;
+  config: MajorsBotConfig;
+}
+export interface MajorsBotTrade {
+  id: string;
+  symbol: string;
+  exchange: string;
+  market_type: string | null;
+  direction: "long" | "short";
+  strategy: MajorsBotStrategy;
+  signal_at: string;
+  entry_price: number;
+  entry_at: string;
+  entry_bar_at: string | null;
+  entry_mode: "limit" | "market" | null;
+  limit_price: number | null;
+  expire_at: string | null;
+  signal_high: number | null;
+  signal_low: number | null;
+  notional_usd: number;
+  qty: number;
+  paper_equity_at_entry: number;
+  stop_price: number;
+  initial_stop_price: number | null;
+  take_profit_price: number | null;
+  peak_price: number | null;
+  partial_exit_price: number | null;
+  partial_exit_at: string | null;
+  partial_pnl_usd: number | null;
+  partial_qty: number | null;
+  close_price: number | null;
+  closed_at: string | null;
+  close_reason: string | null;
+  realized_pnl_usd: number | null;
+  realized_r: number | null;
+  realized_r_net: number | null;
+  fees_usd: number | null;
+  funding_pnl_usd: number | null;
+  funding_rate_at_entry: number | null;
+  funding_pctile_at_entry: number | null;
+  status: "pending" | "open" | "closed" | "cancelled";
+}
+export interface MajorsBotAnalyticsRow {
+  label: string;
+  n_trades: number;
+  wins: number;
+  win_rate: number | null;
+  realized_pnl_usd: number;
+  realized_r: number;
+  realized_r_net: number;
+  avg_r_net: number | null;
+  expectancy_r_net: number | null;
+  fees_usd: number;
+  funding_pnl_usd: number;
+}
+export interface MajorsBotAnalytics {
+  days: number;
+  by_strategy: MajorsBotAnalyticsRow[];
+  by_strategy_direction: MajorsBotAnalyticsRow[];
+  by_symbol: MajorsBotAnalyticsRow[];
+  paper_equity: number;
+}
+export const majorsbotApi = {
+  status: () => http.get<MajorsBotStatus>("/majorsbot/status").then((r) => r.data),
+  trades: (params?: {
+    strategy?: string;
+    symbol?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) =>
+    http
+      .get<{ items: MajorsBotTrade[]; limit: number; offset: number }>("/majorsbot/trades", {
+        params,
+      })
+      .then((r) => r.data),
+  analytics: (days = 90) =>
+    http.get<MajorsBotAnalytics>("/majorsbot/analytics", { params: { days } }).then((r) => r.data),
 };
