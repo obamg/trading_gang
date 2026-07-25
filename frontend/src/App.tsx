@@ -24,6 +24,7 @@ import WalletWatchPage from "@/pages/dashboard/walletwatch";
 import ListingWatchPage from "@/pages/dashboard/listings";
 import WaveWatchPage from "@/pages/dashboard/wavewatch";
 import WaveBotPage from "@/pages/dashboard/bot";
+import MajorsBotPage from "@/pages/dashboard/majorsbot";
 import SettingsPage from "@/pages/settings";
 import LandingPage from "@/pages/landing";
 import { useAuthStore } from "@/stores/authStore";
@@ -121,6 +122,7 @@ export default function App() {
             <Route path="/listings" element={<ListingWatchPage />} />
             <Route path="/wavewatch" element={<WaveWatchPage />} />
             <Route path="/bot" element={<WaveBotPage />} />
+            <Route path="/majorsbot" element={<MajorsBotPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
 
