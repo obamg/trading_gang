@@ -142,6 +142,10 @@ services:
       BOT_TRAIL_ARM_R: ${BOT_TRAIL_ARM_R:-1.0}
       BOT_TRAIL_DISTANCE_R: ${BOT_TRAIL_DISTANCE_R:-1.0}
       MAJORSBOT_ENABLED: ${MAJORSBOT_ENABLED:-true}
+      # Disabled 2026-07-31: funding_percentile() tie/cap bug fires false shorts
+      # on Bybit's 0.01% funding ceiling (see git history). Re-enable only after
+      # a corrected, freshly bake-off-validated funding-fade.
+      MAJORSBOT_FUNDINGFADE_ENABLED: ${MAJORSBOT_FUNDINGFADE_ENABLED:-false}
       SCHEDULER_ENABLED: "false"
       RUN_MIGRATIONS: "1"
       RUN_SEED: "0"
@@ -231,6 +235,10 @@ services:
       BOT_TRAIL_ARM_R: ${BOT_TRAIL_ARM_R:-1.0}
       BOT_TRAIL_DISTANCE_R: ${BOT_TRAIL_DISTANCE_R:-1.0}
       MAJORSBOT_ENABLED: ${MAJORSBOT_ENABLED:-true}
+      # Disabled 2026-07-31: funding_percentile() tie/cap bug fires false shorts
+      # on Bybit's 0.01% funding ceiling (see git history). Re-enable only after
+      # a corrected, freshly bake-off-validated funding-fade.
+      MAJORSBOT_FUNDINGFADE_ENABLED: ${MAJORSBOT_FUNDINGFADE_ENABLED:-false}
       SCHEDULER_ENABLED: "true"
       WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
