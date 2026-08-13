@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     # Analysis modules (Team 5)
     coingecko_api_key: str = ""
     trading_economics_api_key: str = ""
+    santiment_api_key: str = ""
 
     # WalletWatch — DEX swap tracking for labeled smart-money wallets.
     walletwatch_enabled: bool = False
