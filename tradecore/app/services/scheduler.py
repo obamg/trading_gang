@@ -32,6 +32,7 @@ from app.modules.listingwatch import watcher as listingwatch_watcher
 from app.modules.awakening import detector as awakening_detector
 from app.modules.wavewatch import detector as wavewatch_detector
 from app.modules.whaleradar import detector as whaleradar_detector
+from app.modules.chainpulse import collector as chainpulse_collector
 from app.services import redis_service
 from app.services.exchanges import sync as exchange_sync
 
@@ -192,6 +193,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         hours=24,
         id="macro_calendar",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        chainpulse_collector.run_daily_collection,
+        "interval",
+        hours=24,
+        id="chainpulse_daily",
         coalesce=True,
         max_instances=1,
     )

@@ -46,6 +46,7 @@ from app.modules.walletwatch.router import router as walletwatch_router
 from app.modules.listingwatch.router import router as listingwatch_router
 from app.modules.awakening.router import router as awakening_router
 from app.modules.wavewatch.router import router as wavewatch_router
+from app.modules.chainpulse.router import router as chainpulse_router
 from app.modules.majorsbot.router import router as majorsbot_router
 from app.services import redis_service
 from app.services.binance_stream import manager as binance_manager
@@ -262,6 +263,7 @@ app.include_router(walletwatch_router)
 app.include_router(listingwatch_router)
 app.include_router(awakening_router)
 app.include_router(wavewatch_router)
+app.include_router(chainpulse_router)
 app.include_router(majorsbot_router)
 
 
