@@ -2,14 +2,14 @@ import { describe, it, expect } from "vitest";
 import { MODULES, MODULE_BY_KEY } from "../modules";
 
 describe("MODULES nav list", () => {
-  it("includes both bot dashboards with their routes", () => {
-    const bot = MODULES.find((m) => m.key === "bot");
-    expect(bot?.label).toBe("WaveBot");
-    expect(bot?.path).toBe("/bot");
-
+  it("includes the MajorsBot dashboard with its route", () => {
     const majors = MODULES.find((m) => m.key === "majorsbot");
     expect(majors?.label).toBe("MajorsBot");
     expect(majors?.path).toBe("/majorsbot");
+  });
+
+  it("no longer includes the retired WaveBot dashboard", () => {
+    expect(MODULES.find((m) => m.key === "bot")).toBeUndefined();
   });
 
   it("has unique keys and paths", () => {

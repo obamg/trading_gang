@@ -148,67 +148,6 @@ class Settings(BaseSettings):
     wavewatch_active_cooldown_minutes: int = 30         # per-symbol; shorter than incoming because cascades restart
     wavewatch_active_max_per_hour: int = 10             # separate cap from wave_incoming
 
-    # WaveBot — paper-trading bot driven by wave_active alerts. Off by default;
-    # flip BOT_ENABLED once you've watched the listener log for a session and
-    # trust the veto behaviour. v1 is paper-only — no order routing.
-    bot_enabled: bool = False
-    bot_paper_equity_initial: float = 10_000.0
-    bot_position_size_pct: float = 0.05          # hard cap on notional per trade (5% of equity)
-    bot_risk_per_trade_pct: float = 0.0025       # risk-normalized sizing: 0.25% equity at risk per
-                                                 # trade. notional = min(risk/stop_dist, cap above).
-                                                 # 0 → fall back to fixed-notional (cap) sizing.
-    bot_max_concurrent: int = 5                  # → 25% max exposure at full
-    bot_take_profit_r_multiple: float = 2.0      # TP at 2R, simple to evaluate
-    bot_stop_buffer_pct: float = 0.0005          # 0.05% past the candle extreme
-    bot_per_symbol_cooldown_minutes: int = 120   # no re-entry for 2h after close
-    bot_max_hold_hours: int = 24                 # force-close positions open longer than this
-                                                 # (frees orphans whose candle stream went stale). 0 disables.
-    bot_fee_pct_per_side: float = 0.0006         # taker fee per side (Bybit ~0.06%); charged on entry+exit
-    bot_slippage_pct: float = 0.0005             # adverse slippage on market exits (stop/manual/timeout)
-    bot_funding_interval_hours: float = 8.0      # perp funding interval for accrual estimate. 0 disables.
-    bot_long_enabled: bool = True                # per-direction gates — flip via env, not code,
-    bot_short_enabled: bool = True               # when fresh data shows a side is negative-EV
-    # Risk governors — all default OFF; they exist so risk_per_trade can be raised
-    # safely (correlated microcap positions are one trade wearing five hats).
-    bot_max_open_risk_pct: float = 0.0           # skip entries when Σ open $risk / equity ≥ this. 0 disables.
-    bot_loss_throttle_stops: int = 0             # N stop-outs within the window trips the throttle. 0 disables.
-    bot_loss_throttle_window_hours: float = 6.0
-    bot_loss_throttle_factor: float = 0.5        # risk multiplier while throttled
-    bot_loss_throttle_cooldown_hours: float = 24.0
-    bot_max_turnover_notional_pct: float = 0.0   # notional ≤ pct × rolling 12-bar turnover (live-viability
-                                                 # guard on thin books). 0 disables.
-    # Entry-quality filters from the 2026-07-10 calibration (in-sample; forward-
-    # testing via prod compose env). Code defaults OFF.
-    bot_min_vol_ratio: float = 0.0               # skip when signal vol_ratio < this (calib: <15 bleeds). 0 disables.
-    bot_max_abs_funding: float = 0.0             # skip when |funding| ≥ this fraction (calib: ≥0.002 inverts
-                                                 # the squeeze thesis). 0 disables.
-    bot_blocked_hours_utc: str = ""              # comma-separated UTC hours to skip entries (e.g. "0,1,2,3,4,5")
-    # Asset selection — code defaults OFF (no behaviour change); the active prod
-    # policy is set via compose env. See bot/vetoes.py.
-    bot_perp_only: bool = False                  # skip non-perp (spot) signals — spot can't be shorted live
-    bot_symbol_blocklist: str = ""               # comma-separated symbols to never trade (case-insensitive)
-    bot_min_turnover_usd: float = 0.0            # skip if recent rolling turnover < this (0 disables). Needs calibration.
-    bot_daily_drawdown_cap_pct: float = 0.05     # kill switch at -5% from daily anchor
-    bot_oracle_veto_long_below: float = -30.0    # skip longs when oracle is bearish
-    bot_oracle_veto_short_above: float = 30.0    # skip shorts when oracle is bullish
-    bot_news_veto_window_minutes: int = 30       # skip if high-impact news in last N min
-    bot_entry_delay_seconds: int = 60            # settle delay before pulling the entry fill
-    bot_monitor_tick_seconds: int = 30           # how often to check open positions for stop/TP
-    bot_live_enabled: bool = False               # v2: when true, route fills to a real exchange
-    bot_live_leverage: int = 5                   # v2: isolated leverage on Bybit perps
-    # V2 — retrace LIMIT entry + partial-trail exit (replay evidence: chase-market
-    # entries at the cascade close are structurally late; fixed 2R TP is negative
-    # under every entry). Code defaults keep v1 behaviour; prod flips via compose.
-    bot_entry_mode: str = "chase"                # chase | retrace (limit at a pullback into the signal bar)
-    bot_retrace_depth: float = 0.5               # limit = ref − depth × signal-bar range (long; mirror short)
-    bot_retrace_window_bars: int = 12            # 5m bars an unfilled limit stays working before cancel
-    bot_min_stop_distance_pct: float = 0.015     # floor on |entry−stop|/entry, both entry modes. 0 disables.
-    bot_exit_mode: str = "fixed_tp"              # fixed_tp | partial_trail
-    bot_partial_take_r: float = 1.5              # partial-trail: close bot_partial_fraction at this R
-    bot_partial_fraction: float = 0.5            # fraction of qty closed at the partial target
-    bot_trail_arm_r: float = 1.0                 # favorable excursion (in R) that arms the runner trail
-    bot_trail_distance_r: float = 1.0            # trail distance behind the peak, in R
-
     # MajorsBot — independent paper bot on a FIXED majors universe (Bybit linear
     # perps, self-computed 1h-bar signals; no alerts). Strategy parameters
     # (thresholds, retrace depth, trail distances) are frozen in
