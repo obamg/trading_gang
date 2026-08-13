@@ -103,6 +103,13 @@ services:
       # on Bybit's 0.01% funding ceiling (see git history). Re-enable only after
       # a corrected, freshly bake-off-validated funding-fade.
       MAJORSBOT_FUNDINGFADE_ENABLED: ${MAJORSBOT_FUNDINGFADE_ENABLED:-false}
+      # Sizing raised 2026-08-13 (was 0.0025 risk / 0.05 cap). The 5% notional
+      # cap bound on EVERY trade, throttling real risk to ~$8.56 vs the $24.86
+      # the 0.25% setting intended. Now 1% risk with a 50% cap so the
+      # risk-based leg binds. Max heat = 6 concurrent × 1% = 6% of equity.
+      # R-multiples are risk-normalized, so this does NOT affect the n≥30 gate.
+      MAJORSBOT_RISK_PER_TRADE_PCT: ${MAJORSBOT_RISK_PER_TRADE_PCT:-0.01}
+      MAJORSBOT_POSITION_SIZE_PCT: ${MAJORSBOT_POSITION_SIZE_PCT:-0.5}
       SCHEDULER_ENABLED: "false"
       RUN_MIGRATIONS: "1"
       RUN_SEED: "0"
@@ -153,6 +160,13 @@ services:
       # on Bybit's 0.01% funding ceiling (see git history). Re-enable only after
       # a corrected, freshly bake-off-validated funding-fade.
       MAJORSBOT_FUNDINGFADE_ENABLED: ${MAJORSBOT_FUNDINGFADE_ENABLED:-false}
+      # Sizing raised 2026-08-13 (was 0.0025 risk / 0.05 cap). The 5% notional
+      # cap bound on EVERY trade, throttling real risk to ~$8.56 vs the $24.86
+      # the 0.25% setting intended. Now 1% risk with a 50% cap so the
+      # risk-based leg binds. Max heat = 6 concurrent × 1% = 6% of equity.
+      # R-multiples are risk-normalized, so this does NOT affect the n≥30 gate.
+      MAJORSBOT_RISK_PER_TRADE_PCT: ${MAJORSBOT_RISK_PER_TRADE_PCT:-0.01}
+      MAJORSBOT_POSITION_SIZE_PCT: ${MAJORSBOT_POSITION_SIZE_PCT:-0.5}
       SCHEDULER_ENABLED: "true"
       WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
