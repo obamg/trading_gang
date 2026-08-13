@@ -65,45 +65,70 @@ def _build_query(slug: str, from_iso: str, to_iso: str) -> str:
     """
 
 
-def _latest_value(timeseries_json: str | None) -> float | None:
-    """Extract the most recent non-null value from a Santiment timeseriesDataJson string."""
-    if not timeseries_json:
+def _rows(timeseries) -> list | None:
+    """Normalize a ``timeseriesDataJson`` field to a list of points.
+
+    Despite the name, the API returns it already decoded as a list of
+    ``{"datetime", "value"}`` dicts — json.loads() on that raises TypeError and
+    silently yields no data, so accept both the decoded list and a raw string.
+    """
+    if not timeseries:
         return None
-    try:
-        rows = json.loads(timeseries_json)
-        if not isinstance(rows, list):
+    if isinstance(timeseries, str):
+        try:
+            timeseries = json.loads(timeseries)
+        except (json.JSONDecodeError, ValueError):
             return None
-        for row in reversed(rows):
+    return timeseries if isinstance(timeseries, list) else None
+
+
+def _latest_value(timeseries_json) -> float | None:
+    """Most recent non-null value from a Santiment timeseriesDataJson field."""
+    rows = _rows(timeseries_json)
+    if rows is None:
+        return None
+    for row in reversed(rows):
+        try:
             v = row.get("value")
-            if v is not None:
+        except AttributeError:
+            continue
+        if v is not None:
+            try:
                 return float(v)
-    except (json.JSONDecodeError, TypeError, ValueError):
-        pass
+            except (TypeError, ValueError):
+                return None
     return None
 
 
-def _latest_datetime(timeseries_json: str | None) -> datetime | None:
-    """Extract the datetime of the most recent non-null point."""
-    if not timeseries_json:
+def _latest_datetime(timeseries_json) -> datetime | None:
+    """Datetime of the most recent non-null point."""
+    rows = _rows(timeseries_json)
+    if rows is None:
         return None
-    try:
-        rows = json.loads(timeseries_json)
-        if not isinstance(rows, list):
-            return None
-        for row in reversed(rows):
-            if row.get("value") is not None:
-                dt_str = row.get("datetime")
-                if dt_str:
-                    return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-    except (json.JSONDecodeError, TypeError, ValueError):
-        pass
+    for row in reversed(rows):
+        try:
+            if row.get("value") is None:
+                continue
+            dt_str = row.get("datetime")
+        except AttributeError:
+            continue
+        if dt_str:
+            try:
+                return datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
+            except ValueError:
+                return None
     return None
 
 
 async def collect_asset(client: httpx.AsyncClient, asset: str, now: datetime) -> dict | None:
-    # Query 60 days back to capture data even with the 30-day free-tier lag
-    from_dt = (now - timedelta(days=60)).strftime("%Y-%m-%dT00:00:00Z")
-    to_dt = now.strftime("%Y-%m-%dT00:00:00Z")
+    # Santiment enforces the plan's time restriction on the WHOLE query — a `to`
+    # past the ceiling errors the request out entirely rather than clipping it,
+    # so the window has to end at the lag boundary, not at `now`. SANAPI FREE
+    # allows >30d old and <1y old; CHAINPULSE_LAG_DAYS=0 on a paid plan.
+    lag_days = max(int(getattr(settings, "chainpulse_lag_days", 0) or 0), 0)
+    window_end = now - timedelta(days=lag_days)
+    from_dt = (window_end - timedelta(days=60)).strftime("%Y-%m-%dT00:00:00Z")
+    to_dt = window_end.strftime("%Y-%m-%dT00:00:00Z")
 
     headers = {"Content-Type": "application/graphql"}
     if settings.santiment_api_key:

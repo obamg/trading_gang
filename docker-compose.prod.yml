@@ -79,6 +79,10 @@ services:
       TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-false}
       WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      SANTIMENT_API_KEY: ${SANTIMENT_API_KEY:-}
+      # SANAPI FREE serves data >30d old and rejects a query whose `to` is past
+      # that ceiling. Set to 0 on a paid plan to collect up to today.
+      CHAINPULSE_LAG_DAYS: ${CHAINPULSE_LAG_DAYS:-31}
       TRADING_ECONOMICS_API_KEY: ${TRADING_ECONOMICS_API_KEY:-}
       BINANCE_STREAMS_ENABLED: ${BINANCE_STREAMS_ENABLED:-true}
       MARKET_DATA_SOURCE: ${MARKET_DATA_SOURCE:-bybit}
@@ -170,6 +174,10 @@ services:
       SCHEDULER_ENABLED: "true"
       WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      SANTIMENT_API_KEY: ${SANTIMENT_API_KEY:-}
+      # SANAPI FREE serves data >30d old and rejects a query whose `to` is past
+      # that ceiling. Set to 0 on a paid plan to collect up to today.
+      CHAINPULSE_LAG_DAYS: ${CHAINPULSE_LAG_DAYS:-31}
       TRADING_ECONOMICS_API_KEY: ${TRADING_ECONOMICS_API_KEY:-}
       RUN_MIGRATIONS: "0"
       RUN_SEED: "0"

@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     coingecko_api_key: str = ""
     trading_economics_api_key: str = ""
     santiment_api_key: str = ""
+    # Santiment plan time restriction. SANAPI FREE only serves data older than
+    # ~30d (and newer than 1y) and rejects the whole query if `to` is past that
+    # ceiling — so the collector's window must end this many days back. Set to 0
+    # on a paid plan to collect up to today.
+    chainpulse_lag_days: int = 31
 
     # WalletWatch — DEX swap tracking for labeled smart-money wallets.
     walletwatch_enabled: bool = False
