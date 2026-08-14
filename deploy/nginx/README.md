@@ -26,7 +26,7 @@ vhost files, version-controlled here so we can diff changes without SSHing.
 
 | File | Domains | Upstream |
 |------|---------|----------|
-| `formationdouane.online.conf` | `formationdouane.online`, `www.`, `app.` | `__GATEWAY_IP__:8090` |
+| `getmove.online.conf` | `getmove.online`, `www.`, `app.` | `__GATEWAY_IP__:8090` |
 
 ## Deploying a vhost
 
@@ -38,8 +38,8 @@ GW=$(docker network inspect toxal_toxal --format '{{(index .IPAM.Config 0).Gatew
 
 # 2. Render the template on the host
 sed "s/__GATEWAY_IP__/$GW/g" \
-    /opt/tradecore/deploy/nginx/formationdouane.online.conf \
-    | sudo tee /opt/toxal/nginx/conf.d/formationdouane.online.conf > /dev/null
+    /opt/tradecore/deploy/nginx/getmove.online.conf \
+    | sudo tee /opt/toxal/nginx/conf.d/getmove.online.conf > /dev/null
 
 # 3. First-time only: comment out the 443 block, issue the cert, uncomment
 #    (see inline instructions at the top of the .conf file).
