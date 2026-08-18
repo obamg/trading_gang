@@ -23,19 +23,36 @@ COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.production"
 
 echo "==> Checking DNS for ${DOMAIN} and www.${DOMAIN}"
 THIS_IP="$(curl -s --max-time 10 https://api.ipify.org || true)"
+PROXIED=0
 for host in "${DOMAIN}" "www.${DOMAIN}"; do
     got="$(getent hosts "${host}" | awk '{print $1}' | head -1 || true)"
     if [ -z "${got}" ]; then
-        echo "    FAIL: ${host} does not resolve. Add the A record first." >&2
+        echo "    FAIL: ${host} does not resolve. Add the DNS record first." >&2
         exit 1
     fi
     echo "    ${host} -> ${got}${THIS_IP:+ (this server: ${THIS_IP})}"
     if [ -n "${THIS_IP}" ] && [ "${got}" != "${THIS_IP}" ]; then
-        echo "    WARNING: ${host} does not point at this server."
-        echo "    If a CDN/proxy sits in front, validation may still work, but"
-        echo "    the cert this server serves will not be the one users see." >&2
+        PROXIED=1
     fi
 done
+
+if [ "${PROXIED}" = "1" ]; then
+    cat >&2 <<'WARN'
+    NOTE: DNS does not resolve to this server, so a proxy (Cloudflare) is in
+    front. HTTP-01 can still validate through it, but it is more fragile:
+    "Always Use HTTPS" redirects the challenge, and cached/blocked paths break
+    it outright.
+
+    The reliable order for a FIRST issuance behind Cloudflare is:
+      1. set the DNS records to "DNS only" (grey cloud)
+      2. run this script — validation goes straight to the origin
+      3. switch the records back to "Proxied" (orange cloud)
+      4. set SSL/TLS mode to "Full (strict)"
+
+    Continuing anyway in 10s (Ctrl-C to abort and do the above).
+WARN
+    sleep 10
+fi
 
 echo "==> Bringing nginx up on the HTTP-only bootstrap config"
 # Swap the mounted config by pointing the bind-mount at the bootstrap file.
