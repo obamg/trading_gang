@@ -349,13 +349,51 @@ jobs:
           fi
           echo "waiting 30s for containers to start..."
           sleep 30
+
+          # NOTE: deliberately NO -k here. The previous probe used it, so an
+          # expired certificate was invisible — the site sat broken for five
+          # weeks while this step stayed green. A cert problem must fail the
+          # deploy, because it is exactly what users hit first.
+          ok=0
           for i in 1 2 3 4 5 6 7 8; do
-            if curl -fsSk "$url" >/dev/null; then
-              echo "health check ok ($url)"
-              exit 0
+            if curl -fsS "$url" >/dev/null; then
+              echo "GET health ok ($url)"
+              ok=1
+              break
             fi
             echo "attempt $i failed, retrying..."
             sleep 10
           done
-          echo "health check FAILED after 8 attempts"
-          exit 1
+          if [[ "$ok" != "1" ]]; then
+            echo "health check FAILED after 8 attempts (GET $url)"
+            echo "If this is a TLS error, check the certificate — the probe no"
+            echo "longer ignores cert failures."
+            exit 1
+          fi
+
+          # A GET alone is not enough: the outage that prompted this had GETs
+          # returning 200 while every POST was reset at the proxy, so login was
+          # dead while health looked perfect. Exercise a real POST too.
+          login_url="${url%/api/health}/api/auth/login"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            --max-time 20 -X POST "$login_url" \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"probe@invalid.example","password":"deliberately-wrong"}' || echo 000)"
+          # 401 = the API processed the request and rejected the credentials,
+          # which is the healthy answer. 400/422 also prove the request landed.
+          case "$code" in
+            401|400|422)
+              echo "POST login probe ok (HTTP $code — request reached the API)"
+              ;;
+            000)
+              echo "POST login probe FAILED: connection error (reset/TLS/timeout)."
+              echo "GET worked but POST did not — this is the signature of a"
+              echo "proxy or CDN dropping POST bodies. Login is broken."
+              exit 1
+              ;;
+            *)
+              echo "POST login probe FAILED: unexpected HTTP $code"
+              exit 1
+              ;;
+          esac
+          echo "health check ok"
