@@ -45,10 +45,19 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 # Single worker required: WebSocket ConnectionManager and Redis pubsub relay
 # are in-process singletons that cannot be shared across workers. Multiple
 # workers would cause split-brain WS state and duplicate alert delivery.
+#
+# --forwarded-allow-ips="*": trust X-Forwarded-For from the proxy in front, so
+# request.client.host is the real client rather than nginx's container IP.
+# slowapi keys rate limits on that address (get_remote_address) and login is
+# capped at 10/15min — without this every user shares ONE bucket and a few
+# attempts lock everybody out. "*" is safe here because this container
+# publishes no ports: nginx on the internal network is the only way to reach
+# it, and nginx overwrites the header from Cloudflare's CF-Connecting-IP.
 CMD ["gunicorn", "app.main:app", \
      "--workers", "1", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
+     "--forwarded-allow-ips", "*", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
      "--timeout", "60"]

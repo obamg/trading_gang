@@ -1,4 +1,4 @@
-# TradeCore production stack — dedicated VPS (formationdouane.online)
+# TradeCore production stack — dedicated VPS (getmove.online)
 #
 # Deploy:
 #   1. Copy repo to /opt/tradecore on the VPS
@@ -62,12 +62,12 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      FRONTEND_URL: https://formationdouane.online
+      FRONTEND_URL: https://getmove.online
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: https://formationdouane.online/api/auth/google/callback
+      GOOGLE_REDIRECT_URI: https://getmove.online/api/auth/google/callback
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
-      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@formationdouane.online}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@getmove.online}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-TradeCore}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       SMTP_HOST: ${SMTP_HOST:-}
@@ -140,7 +140,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      FRONTEND_URL: https://formationdouane.online
+      FRONTEND_URL: https://getmove.online
       BINANCE_STREAMS_ENABLED: "false"
       MARKET_DATA_SOURCE: ${MARKET_DATA_SOURCE:-bybit}
       BINANCE_MIN_QUOTE_VOLUME_USD: ${BINANCE_MIN_QUOTE_VOLUME_USD:-10000000}
@@ -194,7 +194,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: /api
-        VITE_WS_URL: wss://formationdouane.online/ws
+        VITE_WS_URL: wss://getmove.online/ws
     restart: unless-stopped
     depends_on:
       - api
@@ -212,9 +212,31 @@ services:
       - "443:443"
     volumes:
       - ./deploy/nginx/prod.conf:/etc/nginx/nginx.conf:ro
-      - ./certs:/etc/ssl/cloudflare:ro
       - letsencrypt:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot:ro
+    # Reload every 6h so a certificate renewed by the certbot service is picked
+    # up without a restart — nginx reads certs once at start and would happily
+    # serve an expired one until reloaded.
+    command: >
+      /bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g "daemon off;"'
+    networks:
+      - tradecore
+
+  # ── TLS renewal ──
+  # This service is what was missing before: certificates were issued once by
+  # hand and nothing ever renewed them, so the ws.<old-domain> cert quietly
+  # expired 2026-07-20 and took the site down five weeks later. certbot exits 0
+  # when a cert is not yet due, so this is safe to run twice a day.
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: >
+      /bin/sh -c 'trap exit TERM; while :; do
+      certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h & wait $${!}; done'
     networks:
       - tradecore
 
