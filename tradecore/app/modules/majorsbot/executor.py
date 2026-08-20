@@ -217,8 +217,17 @@ async def open_market_trade(
     paper_equity: Decimal,
     funding_rate: Decimal | None = None,
     funding_pctile: Decimal | None = None,
+    initial_stop_price: Decimal | None = None,
 ) -> MajorsBotTrade:
-    """Direct market open (fundingfade). Taker entry fee accrues at close."""
+    """Direct market open (fundingfade, newsevent). Taker entry fee at close.
+
+    ``initial_stop_price`` defaults to ``stop_price`` — the two only differ for
+    a stopless newsevent position, where ``stop_price`` holds the liquidation
+    price (where the position actually dies) while ``initial_stop_price``
+    holds the reference risk unit that R is measured against. Keeping R
+    anchored to a real risk unit is what lets a stopless strategy still be
+    compared against volevent on net R.
+    """
     now = datetime.now(timezone.utc)
     trade = MajorsBotTrade(
         symbol=symbol,
@@ -235,7 +244,9 @@ async def open_market_trade(
         qty=qty,
         paper_equity_at_entry=paper_equity,
         stop_price=stop_price,
-        initial_stop_price=stop_price,
+        initial_stop_price=(
+            initial_stop_price if initial_stop_price is not None else stop_price
+        ),
         take_profit_price=None,
         funding_rate_at_entry=funding_rate,
         funding_pctile_at_entry=funding_pctile,
@@ -282,11 +293,19 @@ async def take_partial_profit(
     *,
     exit_price: Decimal,
     bar_close_at: datetime,
+    fraction: Decimal | None = None,
 ) -> MajorsBotTrade:
-    """Close VOLEVENT_PARTIAL_FRACTION of the position at the TP (maker limit —
-    no slippage). Realized into equity now; close_trade adds only the runner.
-    partial_exit_at is the BAR close time so funding accrual can split legs."""
-    part_qty = Decimal(str(trade.qty)) * strategies.VOLEVENT_PARTIAL_FRACTION
+    """Close ``fraction`` of the position at the TP (maker limit — no
+    slippage). Realized into equity now; close_trade adds only the runner.
+    partial_exit_at is the BAR close time so funding accrual can split legs.
+
+    ``fraction`` defaults to VOLEVENT_PARTIAL_FRACTION so volevent's behaviour
+    is unchanged; newsevent passes its own so the two can never drift into
+    each other by a shared constant being retuned.
+    """
+    if fraction is None:
+        fraction = strategies.VOLEVENT_PARTIAL_FRACTION
+    part_qty = Decimal(str(trade.qty)) * fraction
     if part_qty <= 0 or trade.partial_exit_at is not None:
         return trade
     entry = Decimal(str(trade.entry_price))
