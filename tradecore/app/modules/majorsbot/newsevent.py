@@ -23,10 +23,19 @@ Why this shape, from measurement rather than preference:
   listing/delisting announcement *causes* the spike and the legs co-occur by
   construction.
 
-Isolation is deliberate. volevent is mid-forward-test (n=21 of 30) and its
-parameters mirror a 12-month backtest, so nothing here touches its path: own
-bar series (5m, ``data.get_fast_market_data``), own tick job, own position
-walker, own sizing knobs.
+Isolation is deliberate. volevent is mid-forward-test (n=8 of 30 closed) and
+its parameters mirror a 12-month backtest, so nothing here touches its path:
+own bar series (5m, ``data.get_fast_market_data``), own tick job, own
+position walker, own sizing knobs, and — since the 2026-08-20 pre-mortem —
+its OWN equity ledger and concurrent counter (``equity.ledger_for``): a
+stopless high-leverage liquidation costs ~95% of its book and must not slash
+volevent's sizing base.
+
+The same pre-mortem drove the paper-realism rules encoded here: entries fill
+at decision-time price with taker slippage (never at a stale spike-bar
+close), the walker REPLAYS from entry-time state each tick (see
+``_walk_open``), stop/trail exits take gap penalties, liquidations book the
+bankruptcy price, and funding accrues over the hold.
 """
 from __future__ import annotations
 
@@ -196,7 +205,17 @@ async def count_open(db) -> int:
     return len(rows)
 
 
-async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict) -> bool:
+def _mmr_for(symbol: str) -> Decimal:
+    """Two-bucket maintenance margin: majors at tier-1, everything else at the
+    small-cap rate. See strategies.NEWSEVENT_MMR_NON_MAJOR for why."""
+    from app.modules.majorsbot.engine import symbol_list
+
+    if symbol in symbol_list():
+        return strategies.NEWSEVENT_MAINTENANCE_MARGIN_RATE
+    return strategies.NEWSEVENT_MMR_NON_MAJOR
+
+
+async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict, md: data.MarketData) -> bool:
     """Both legs present — validate the pair and open at market."""
     if not strategies.legs_paired(
         int(vol_leg["ts_ms"]), int(news_leg["ts_ms"]), strategies.NEWSEVENT_PAIR_WINDOW_S
@@ -227,13 +246,22 @@ async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict) -> bool:
         log.info("newsevent_skipped", symbol=symbol, reason="max_concurrent")
         return False
 
-    entry = _dec(vol_leg["close"])
+    # Entry at DECISION-TIME price: the latest completed bar's close, with
+    # taker slippage. The spike bar's close is up to ~15 min stale when the
+    # news leg lands late (RSS lag + poll cadence) — filling at it silently
+    # credited the position with every tick of movement since, a lookahead
+    # the live version could never have.
+    last_bar = md.bars[-1]
+    entry_raw = _dec(last_bar["c"])
+    entry = strategies.adverse_slippage_price(
+        direction, entry_raw, _dec(app_settings.majorsbot_slippage_pct)
+    )
     extreme = _dec(vol_leg["bar_low"] if direction == "long" else vol_leg["bar_high"])
     # Always computed: with stops on it is the exit, with stops off it is
     # still the risk unit R is measured in.
     ref_stop, _ref_risk = strategies.newsevent_stop(direction, entry, extreme)
 
-    eq = await equity.get_paper_equity()
+    eq = await equity.get_paper_equity(equity.ledger_for(strategies.NEWSEVENT))
     cap_pct = _dec(app_settings.majorsbot_newsevent_position_size_pct)
     stop_enabled = bool(getattr(app_settings, "majorsbot_newsevent_stop_enabled", True))
 
@@ -255,7 +283,7 @@ async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict) -> bool:
         return False
 
     leverage = strategies.effective_leverage(entry * qty, eq)
-    liq = strategies.liquidation_price(direction, entry, leverage)
+    liq = strategies.liquidation_price(direction, entry, leverage, _mmr_for(symbol))
     # stop_price always means "where this position dies". With the protective
     # stop off that is the liquidation price; if leverage is low enough that
     # liquidation is unreachable, fall back to the reference stop so the
@@ -270,7 +298,7 @@ async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict) -> bool:
         strategy=strategies.NEWSEVENT,
         signal_at=_dt(int(vol_leg["ts_ms"])),
         entry_price=entry,
-        entry_bar_at=_dt(int(vol_leg["bar_ts"])),
+        entry_bar_at=_dt(int(last_bar["t"])),
         stop_price=exit_stop,
         initial_stop_price=ref_stop,
         qty=qty,
@@ -309,13 +337,69 @@ async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict) -> bool:
 
 # ---------- position management (5m bars) ----------
 
-async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
-    """Advance one open newsevent position over unseen 5m bars.
+async def _accrued_funding(trade: MajorsBotTrade, md: data.MarketData, exit_bar_ms: int) -> Decimal:
+    """Funding transfer over the hold: every event with entry_bar < ts ≤
+    exit_bar, priced at the containing 5m bar's open. Full qty until the
+    partial bar (inclusive), runner qty after — engine._accrued_funding's
+    two-leg split, on 5m bars.
 
-    A deliberately simpler walker than engine._walk_open: no funding accrual
-    (holds are capped at 6h) and no pending-limit state (entries are market).
-    Same pessimistic ordering as the bake-off — the stop is checked before the
-    target within a bar and wins ties.
+    Not optional realism: a 6h hold crosses an 8h funding event ~75% of the
+    time at max hold, and the delisting-short population pays extreme rates
+    (Bybit moves volatile small caps to 1h funding intervals).
+    """
+    if trade.entry_bar_at is None:
+        return Decimal("0")
+    funding = await data.get_funding(trade.symbol)
+    if not funding:
+        return Decimal("0")
+
+    entry_ms = int(trade.entry_bar_at.timestamp() * 1000)
+    total_qty = _dec(trade.qty)
+    partial_qty = _dec(trade.partial_qty) if trade.partial_qty is not None else Decimal("0")
+    runner_qty = total_qty - partial_qty
+    partial_bar_ms: int | None = None
+    if trade.partial_exit_at is not None:
+        # stored as bar CLOSE
+        partial_bar_ms = int(trade.partial_exit_at.timestamp() * 1000) - strategies.NEWSEVENT_BAR_MS
+
+    total = Decimal("0")
+    for ts, rate in funding:
+        if ts <= entry_ms or ts > exit_bar_ms:
+            continue
+        px = None
+        for b in md.bars:
+            if int(b["t"]) <= ts < int(b["t"]) + strategies.NEWSEVENT_BAR_MS:
+                px = _dec(b["o"])
+                break
+        if px is None:
+            px = _dec(trade.entry_price)
+        qty = (
+            total_qty
+            if (partial_bar_ms is None or ts <= partial_bar_ms)
+            else runner_qty
+        )
+        total += strategies.funding_event_pnl(trade.direction, _dec(rate), px, qty)
+    return total
+
+
+async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
+    """Advance one open newsevent position by REPLAYING all bars since entry.
+
+    Replay, not resume: every tick re-derives the entry-time stop
+    deterministically (liquidation price when stops are off, else the initial
+    stop) and rebuilds the trail ratchet bar by bar. A previous version
+    started each walk from the PERSISTED stop — one tick after the trail
+    armed, the first post-entry bar (whose low sits near entry) retroactively
+    "hit" the ratcheted level and closed every runner at ~+1R. Ratchet
+    updates must only ever apply to LATER bars (strategies.py walk
+    semantics); replaying from entry state guarantees that under
+    re-execution, with no watermark to lose. trade.stop_price is display
+    state only.
+
+    Pessimistic within a bar: liquidation, then stop/trail, then TP. Stop and
+    trail fills take the bake-off gap penalty (an open beyond the level fills
+    at the open); liquidation books the BANKRUPTCY price — the exchange
+    engine's outcome, not the liq trigger. Funding accrues on every close.
     """
     entry_bar = int(trade.entry_bar_at.timestamp() * 1000) if trade.entry_bar_at else 0
     bars = [b for b in md.bars if int(b["t"]) > entry_bar]
@@ -330,11 +414,6 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
         return False
 
     stop_enabled = bool(getattr(app_settings, "majorsbot_newsevent_stop_enabled", True))
-    # With the protective stop off, `stop` starts life as the liquidation
-    # price and is inert until the trail arms at +1R. The trail is profit
-    # protection, not loss limitation, so disabling the stop must not disable
-    # it — otherwise a trail would be recorded and never acted on.
-    stop = _dec(trade.stop_price)
     took_partial = trade.partial_qty is not None and _dec(trade.partial_qty) > 0
     tp = strategies.take_profit_price(
         direction, entry, risk, strategies.NEWSEVENT_TP_R
@@ -346,27 +425,35 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
     leverage = strategies.effective_leverage(
         entry * _dec(trade.qty), _dec(trade.paper_equity_at_entry)
     )
-    liq = strategies.liquidation_price(direction, entry, leverage)
+    liq = strategies.liquidation_price(direction, entry, leverage, _mmr_for(trade.symbol))
+    bankruptcy = strategies.bankruptcy_price(direction, entry, leverage)
 
-    # Whether the trail has already armed on an earlier tick, derived rather
-    # than stored: at entry stop == entry_stop, and the trail only ever
-    # ratchets it toward price, so a strictly tighter stop means it armed.
-    entry_stop = liq if (not stop_enabled and liq is not None) else initial_stop
-    trail_armed = (stop > entry_stop) if direction == "long" else (stop < entry_stop)
-
+    # Entry-time stop, re-derived — never read from the persisted (possibly
+    # ratcheted) trade.stop_price. With stops off there is no protective
+    # level; the trail creates one when it arms.
+    stop: Decimal | None = initial_stop if stop_enabled else None
+    trail_armed = False
     peak = entry
     held = 0
 
+    async def _close(raw_exit: Decimal, reason: str, bar_ms: int) -> None:
+        funding_pnl = await _accrued_funding(trade, md, exit_bar_ms=bar_ms)
+        await executor.close_trade(
+            db, trade, raw_exit_price=raw_exit, reason=reason, funding_pnl=funding_pnl
+        )
+
     for bar in bars:
         held += 1
-        high, low = _dec(bar["h"]), _dec(bar["l"])
+        bar_ms = int(bar["t"])
+        bar_open, high, low = _dec(bar["o"]), _dec(bar["h"]), _dec(bar["l"])
 
         if liq is not None:
             hit_liq = low <= liq if direction == "long" else high >= liq
             if hit_liq:
-                await executor.close_trade(
-                    db, trade, raw_exit_price=liq,
-                    reason=strategies.CLOSE_LIQUIDATION,
+                await _close(
+                    bankruptcy if bankruptcy is not None else liq,
+                    strategies.CLOSE_LIQUIDATION,
+                    bar_ms,
                 )
                 log.warning(
                     "newsevent_liquidated",
@@ -376,13 +463,14 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
                 )
                 return True
 
-        if stop_enabled or trail_armed:
+        if stop is not None:
             hit_stop = low <= stop if direction == "long" else high >= stop
             if hit_stop:
-                await executor.close_trade(
-                    db, trade,
-                    raw_exit_price=stop,
-                    reason=strategies.CLOSE_TRAIL if trail_armed else strategies.CLOSE_STOP,
+                raw = strategies.stop_fill_raw(direction, bar_open, stop, is_entry_bar=False)
+                await _close(
+                    raw,
+                    strategies.CLOSE_TRAIL if trail_armed else strategies.CLOSE_STOP,
+                    bar_ms,
                 )
                 return True
 
@@ -392,7 +480,7 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
                 await executor.take_partial_profit(
                     db, trade,
                     exit_price=tp,
-                    bar_close_at=_dt(int(bar["t"]) + strategies.NEWSEVENT_BAR_MS),
+                    bar_close_at=_dt(bar_ms + strategies.NEWSEVENT_BAR_MS),
                     fraction=strategies.NEWSEVENT_PARTIAL_FRACTION,
                 )
                 took_partial = True
@@ -404,20 +492,21 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
             new_stop = (
                 peak - trail_dist if direction == "long" else peak + trail_dist
             )
-            # Ratchet only — a trail never loosens. When the protective stop
-            # is off, `stop` is still the liquidation price on the first arm,
-            # and the trail is always tighter than that.
-            stop = max(stop, new_stop) if direction == "long" else min(stop, new_stop)
-            trade.stop_price = stop
+            # Ratchet only — a trail never loosens; effective from the NEXT
+            # bar, since this bar's checks already ran.
+            if stop is None:
+                stop = new_stop
+            else:
+                stop = max(stop, new_stop) if direction == "long" else min(stop, new_stop)
             trail_armed = True
 
         if held >= strategies.NEWSEVENT_MAX_HOLD_BARS:
-            await executor.close_trade(
-                db, trade, raw_exit_price=_dec(bar["c"]),
-                reason=strategies.CLOSE_MAX_HOLD,
-            )
+            await _close(_dec(bar["c"]), strategies.CLOSE_MAX_HOLD, bar_ms)
             return True
 
+    # Display state only — the next replay re-derives everything above.
+    if trail_armed and stop is not None and _dec(trade.stop_price) != stop:
+        trade.stop_price = stop
     await db.commit()
     return False
 
@@ -484,7 +573,7 @@ async def run_newsevent_tick() -> dict:
                     news_leg = await load_leg(NEWS_LEG_KEY, symbol)
 
                 if vol_leg is not None and news_leg is not None:
-                    if await _try_enter(db, symbol, vol_leg, news_leg):
+                    if await _try_enter(db, symbol, vol_leg, news_leg, md):
                         totals["opened"] += 1
             except Exception as e:
                 log.warning("newsevent_symbol_failed", symbol=symbol, err=str(e))

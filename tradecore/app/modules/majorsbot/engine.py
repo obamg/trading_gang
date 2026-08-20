@@ -176,11 +176,14 @@ async def _active_symbols(db) -> list[str]:
 
 
 async def _count_open(db) -> int:
+    # Feeds reconcile_concurrent for the DEFAULT ledger — newsevent keeps its
+    # own counter and would be double-counted (then wrongly zeroed) here.
     return (
         await db.execute(
             select(func.count())
             .select_from(MajorsBotTrade)
             .where(MajorsBotTrade.status == "open")
+            .where(MajorsBotTrade.strategy != strategies.NEWSEVENT)
         )
     ).scalar_one()
 

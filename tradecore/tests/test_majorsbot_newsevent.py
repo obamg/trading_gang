@@ -402,3 +402,206 @@ def test_newsevent_does_not_use_global_concurrency_counter():
     src = inspect.getsource(ne._try_enter)
     assert "count_open(db)" in src
     assert "get_concurrent_count" not in src
+
+
+# --- pre-mortem fixes (2026-08-20) ----------------------------------------
+
+from datetime import datetime, timezone
+
+
+class _FakeTrade:
+    def __init__(self, **kw):
+        self.id = "t1"
+        self.symbol = "BTCUSDT"
+        self.direction = "long"
+        self.strategy = "newsevent"
+        self.entry_price = 100.0
+        self.initial_stop_price = 98.0     # risk = 2 → 1R = 2
+        self.stop_price = 98.0
+        self.qty = 2.0                      # notional 200 on 10k equity → lev unreachable
+        self.paper_equity_at_entry = 10000.0
+        self.partial_qty = None
+        self.partial_exit_at = None
+        self.partial_pnl_usd = None
+        self.entry_bar_at = datetime.fromtimestamp(BASE / 1000, tz=timezone.utc)
+        self.entry_at = self.entry_bar_at
+        self.status = "open"
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def _bar(i, o, h, l, c):
+    return {"t": BASE + i * st.NEWSEVENT_BAR_MS, "o": o, "h": h, "l": l, "c": c, "v": 1.0}
+
+
+def _md(bars):
+    from app.modules.majorsbot.data import MarketData
+
+    return MarketData(symbol="BTCUSDT", bars=bars)
+
+
+class _WalkDB:
+    async def commit(self):
+        pass
+
+
+@pytest.fixture()
+def _walker_env(monkeypatch):
+    """Stopless config, majors symbol list, no funding, captured executor calls."""
+    calls = {"close": [], "partial": []}
+
+    async def fake_close(db, trade, *, raw_exit_price, reason, funding_pnl=None, **kw):
+        calls["close"].append({"price": raw_exit_price, "reason": reason, "funding": funding_pnl})
+        trade.status = "closed"
+
+    async def fake_partial(db, trade, *, exit_price, bar_close_at, fraction=None, **kw):
+        calls["partial"].append({"price": exit_price})
+        trade.partial_qty = float(trade.qty) * 0.5
+        trade.partial_exit_at = bar_close_at
+
+    async def no_funding(symbol):
+        return None
+
+    monkeypatch.setattr(ne.executor, "close_trade", fake_close)
+    monkeypatch.setattr(ne.executor, "take_partial_profit", fake_partial)
+    monkeypatch.setattr(ne.data, "get_funding", no_funding)
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_stop_enabled", False, raising=False)
+    monkeypatch.setattr("app.modules.majorsbot.engine.symbol_list", lambda: ["BTCUSDT"])
+    return calls
+
+
+# Bars: bar1 dips near entry, bar2 hits TP (103) and arms the trail
+# (peak 104.5 − 1R = 102.5), bar3 later hits the trail.
+BAR1 = _bar(1, 100.0, 100.5, 99.2, 100.0)
+BAR2 = _bar(2, 100.0, 104.5, 100.0, 104.0)
+BAR3 = _bar(3, 104.0, 104.2, 102.4, 102.6)
+
+
+@pytest.mark.asyncio
+async def test_replay_does_not_rewalk_history_with_ratcheted_stop(_walker_env):
+    """THE pre-mortem walker bug: after the trail armed and trade.stop_price
+    was persisted at 102.5, the next tick re-walked bar1 (low 99.2) against
+    that ratcheted stop and closed every winner at ~+1R. Replay semantics
+    must rebuild the ratchet from entry-time state instead."""
+    trade = _FakeTrade()
+    db = _WalkDB()
+
+    # Tick 1: partial at TP, trail arms, display stop ratchets — no close.
+    closed = await ne._walk_open(db, trade, _md([BAR1, BAR2]))
+    assert closed is False
+    assert len(_walker_env["partial"]) == 1
+    assert float(trade.stop_price) == 102.5
+
+    # Tick 2, same bars, now with the ratcheted stop persisted: the buggy
+    # walker closed here on bar1. Replay must not.
+    closed = await ne._walk_open(db, trade, _md([BAR1, BAR2]))
+    assert closed is False
+    assert _walker_env["close"] == []
+
+    # Tick 3: a genuinely later bar crosses the trail → close, reason trail.
+    closed = await ne._walk_open(db, trade, _md([BAR1, BAR2, BAR3]))
+    assert closed is True
+    assert len(_walker_env["close"]) == 1
+    assert _walker_env["close"][0]["reason"] == st.CLOSE_TRAIL
+    assert float(_walker_env["close"][0]["price"]) == 102.5
+
+
+@pytest.mark.asyncio
+async def test_trail_exit_takes_gap_penalty(_walker_env):
+    """A bar opening beyond the trail fills at the open, not at the level."""
+    trade = _FakeTrade()
+    db = _WalkDB()
+    gap_bar = _bar(3, 101.0, 101.5, 100.8, 101.2)  # opens below the 102.5 trail
+    closed = await ne._walk_open(db, trade, _md([BAR1, BAR2, gap_bar]))
+    assert closed is True
+    assert float(_walker_env["close"][0]["price"]) == 101.0  # the open, worse
+
+
+@pytest.mark.asyncio
+async def test_liquidation_books_bankruptcy_price(_walker_env):
+    """At 10x, liq triggers at 90.5 (0.5% MMR) but the account's realized
+    outcome is the bankruptcy price 90.0 — full margin loss, not an orderly
+    exit at the trigger."""
+    trade = _FakeTrade(qty=1000.0)  # notional 100k on 10k equity → 10x
+    db = _WalkDB()
+    crash = _bar(1, 100.0, 100.0, 90.4, 90.6)  # pierces liq 90.5
+    closed = await ne._walk_open(db, trade, _md([crash]))
+    assert closed is True
+    assert _walker_env["close"][0]["reason"] == st.CLOSE_LIQUIDATION
+    assert float(_walker_env["close"][0]["price"]) == 90.0
+
+
+def test_bankruptcy_price_math():
+    assert st.bankruptcy_price("long", Decimal("100"), Decimal("10")) == Decimal("90")
+    assert st.bankruptcy_price("short", Decimal("100"), Decimal("10")) == Decimal("110")
+    assert st.bankruptcy_price("long", Decimal("100"), Decimal("1")) is None
+
+
+def test_non_major_mmr_is_stricter(monkeypatch):
+    monkeypatch.setattr("app.modules.majorsbot.engine.symbol_list", lambda: ["BTCUSDT"])
+    assert ne._mmr_for("BTCUSDT") == st.NEWSEVENT_MAINTENANCE_MARGIN_RATE
+    assert ne._mmr_for("STORJUSDT") == st.NEWSEVENT_MMR_NON_MAJOR
+    # Stricter MMR → liquidation strikes EARLIER (closer to entry).
+    liq_major = st.liquidation_price("long", Decimal("100"), Decimal("10"), ne._mmr_for("BTCUSDT"))
+    liq_small = st.liquidation_price("long", Decimal("100"), Decimal("10"), ne._mmr_for("STORJUSDT"))
+    assert liq_small > liq_major
+
+
+# --- funding accrual ------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_funding_accrues_over_hold(monkeypatch):
+    """A long paying positive funding loses money; priced at the containing
+    5m bar's open."""
+    event_ts = BASE + int(1.5 * st.NEWSEVENT_BAR_MS)  # inside bar 1
+
+    async def fake_funding(symbol):
+        return [(event_ts, 0.001), (BASE - 1000, 0.5)]  # second is pre-entry
+
+    monkeypatch.setattr(ne.data, "get_funding", fake_funding)
+    trade = _FakeTrade(qty=10.0)
+    md = _md([_bar(1, 100.0, 101.0, 99.0, 100.5), _bar(2, 100.5, 101.0, 100.0, 100.8)])
+
+    pnl = await ne._accrued_funding(trade, md, exit_bar_ms=BASE + 2 * st.NEWSEVENT_BAR_MS)
+    # long pays: −(0.001 × bar1.open 100.0 × qty 10) = −1.0
+    assert pnl == Decimal("-1.0")
+
+
+# --- ledger isolation -----------------------------------------------------
+
+from app.modules.majorsbot import equity as eq_mod
+
+
+def test_ledger_mapping():
+    assert eq_mod.ledger_for(st.NEWSEVENT) == "newsevent"
+    assert eq_mod.ledger_for(st.VOLEVENT) == "paper"
+    assert eq_mod.ledger_for(st.FUNDINGFADE) == "paper"
+
+
+def test_default_ledger_keys_are_byte_identical_to_legacy():
+    """The live volevent forward test's Redis state must survive this
+    refactor — the default ledger MUST resolve to the pre-split keys."""
+    assert eq_mod._equity_key("paper") == "majorsbot:equity:paper"
+    assert eq_mod._concurrent_key("paper") == "majorsbot:concurrent_count"
+    assert eq_mod._equity_key("newsevent") == "majorsbot:equity:newsevent"
+    assert eq_mod._concurrent_key("newsevent") == "majorsbot:concurrent:newsevent"
+
+
+@pytest.mark.asyncio
+async def test_ledgers_do_not_share_balance(monkeypatch, fake_redis):
+    monkeypatch.setattr(eq_mod.redis_service, "get_redis", lambda: fake_redis)
+    base = await eq_mod.get_paper_equity()
+    await eq_mod.add_to_equity(Decimal("-9500"), "newsevent")  # a liquidation
+    # volevent's book must be untouched.
+    assert await eq_mod.get_paper_equity() == base
+    assert await eq_mod.get_paper_equity("newsevent") == base - Decimal("9500")
+
+
+def test_engine_reconcile_excludes_newsevent():
+    """engine reconciles the DEFAULT ledger's counter from DB truth; counting
+    newsevent's open position there would zero-drift the wrong book."""
+    import inspect
+
+    from app.modules.majorsbot import engine
+
+    assert "NEWSEVENT" in inspect.getsource(engine._count_open)
