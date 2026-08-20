@@ -6,6 +6,7 @@ down the scheduler. Jobs are no-ops in local dev unless there's data in Redis.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -21,6 +22,7 @@ from app.modules.radarx import detector as radarx_detector
 from app.modules.sentimentpulse import collector as sentiment_collector
 from app.modules.flowpulse import detector as flowpulse_detector
 from app.modules.newspulse import collector as newspulse_collector
+from app.modules.newspulse import universe as newspulse_universe
 from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.walletwatch import detector as walletwatch_detector
@@ -207,10 +209,31 @@ def start_scheduler() -> AsyncIOScheduler:
     sched.add_job(
         newspulse_collector.run_news_collection,
         "interval",
-        minutes=5,
+        minutes=1,
         id="newspulse_collect",
         coalesce=True,
         max_instances=1,
+    )
+    # Separate from the RSS tick: Binance BAPI throttles, so the primary
+    # announcement sources run at half the cadence. See announcements.py.
+    sched.add_job(
+        newspulse_collector.run_announcement_collection,
+        "interval",
+        minutes=2,
+        id="newspulse_announcements",
+        coalesce=True,
+        max_instances=1,
+    )
+    # Coin-attribution universe: exchange tickers + CoinGecko top-500 names.
+    # Cached in Redis with a 7-day TTL, so a failed refresh degrades slowly.
+    sched.add_job(
+        newspulse_universe.run_universe_refresh,
+        "interval",
+        hours=24,
+        id="newspulse_universe",
+        coalesce=True,
+        max_instances=1,
+        next_run_time=datetime.now(timezone.utc),
     )
     # Team 6 — Oracle outcome measurement
     sched.add_job(

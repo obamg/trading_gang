@@ -1,20 +1,35 @@
 """NewsPulse — crypto news aggregator.
 
-Polls a small set of free RSS feeds every 5 minutes. Stores articles in DB,
-publishes high-impact items via Redis pubsub and Telegram.
+Two source tiers, two scheduler jobs, one storage/notify path:
+
+- **Media RSS** (this file, ``newspulse_collect``, every minute): secondary
+  reporting, measured p50 211–493s behind the event. Conditional GET, so an
+  unchanged feed costs a 304 and no body.
+- **Primary announcements** (``announcements.py``, ``newspulse_announcements``,
+  every 2 minutes): exchange listing/delisting notices and regulator press
+  releases — the publishers the media tier is reporting *on*.
+
+Both land in ``news_articles`` and share ``_collect``, so dedupe (unique
+``source_id``), the WS relay and the Telegram fan-out are defined once.
 
 Switched from CoinGecko News API after they moved that endpoint behind a
 PRO-only paywall in 2026. RSS gives us ~95% of the price-moving stories
 from the same sources for free, with no auth and no quota.
+
+Keyword matching is **word-boundary anchored** (see ``text.compile_terms``).
+The original substring implementation made ``ath`` fire on "gather"/"path",
+``ban`` on "banking", and ``sec`` on "second"/"sector", which tagged 45% of
+all articles high-impact and skewed sentiment bearish. Any new term set here
+must go through ``compile_terms`` — never ``word in text``.
+
+Coin attribution lives in ``universe.py``, driven off the exchange instrument
+lists plus CoinGecko names rather than a hardcoded symbol list.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import re
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
-from xml.etree import ElementTree as ET
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy import select
@@ -23,6 +38,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.news import NewsArticle
+from app.modules.newspulse import announcements, universe
+from app.modules.newspulse.text import compile_terms, distinct_hits, parse_rss_xml
+from app.modules.newspulse.universe import CoinMap, legacy_coin_map
 from app.services import redis_service
 
 RSS_FEEDS = (
@@ -31,7 +49,16 @@ RSS_FEEDS = (
     ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
 )
 RSS_USER_AGENT = "Mozilla/5.0 (compatible; TradeCore-NewsPulse/1.0)"
-HTML_TAG_RE = re.compile(r"<[^>]+>")
+# Per-feed HTTP validators for conditional GET, keyed by feed URL. The
+# scheduler is a single process and this job is its only writer, so an
+# in-process dict is enough — a restart costs one unconditional refetch.
+_FEED_VALIDATORS: dict[str, dict[str, str]] = {}
+
+# Anything published longer ago than this is stored but never alerted on.
+# Announcement endpoints return a page of history, so without this a first
+# run (or a restart after downtime) would blast days of old notices to
+# Telegram as if they had just happened.
+NOTIFY_MAX_AGE = timedelta(minutes=30)
 
 BULLISH_WORDS = {
     "surge", "surges", "surging", "soar", "soars", "soaring", "rally", "rallies",
@@ -48,123 +75,87 @@ BEARISH_WORDS = {
     "slump", "fear", "panic", "collapse", "rug", "rugged", "lawsuit", "sec",
     "crackdown", "warning", "risk",
 }
-HIGH_IMPACT_WORDS = {
-    "sec", "etf", "fed", "federal reserve", "regulation", "regulatory",
-    "ban", "hack", "exploit", "billion", "crash", "all-time high",
-    "approval", "halving", "fork", "blackrock", "grayscale", "binance",
-    "coinbase", "breaking",
+# Importance is scored as a weighted sum, not a flat hit count. A single
+# STRONG term clears the bar on its own; WEAK terms are ambient crypto-media
+# vocabulary that only means something when several corroborate.
+HIGH_IMPACT_STRONG = {
+    "hack", "hacks", "hacked", "exploit", "exploits", "exploited", "breach",
+    "breached", "drained", "insolvency", "insolvent", "bankruptcy",
+    "halt", "halts", "halted",
+    "delist", "delisted", "delisting", "etf", "sec", "cftc", "lawsuit",
+    "sues", "sued", "indicted", "crackdown", "halving", "hard fork",
+    "fomc", "rate cut", "rate hike", "emergency",
 }
+HIGH_IMPACT_WEAK = {
+    "fed", "federal reserve", "regulation", "regulatory", "ban", "bans",
+    "banned", "approval", "approved", "billion", "crash", "crashes",
+    "all-time high", "ath", "fork", "upgrade", "unlock", "unlocks",
+    "blackrock", "grayscale", "microstrategy", "binance", "coinbase",
+    "breaking", "inflation", "cpi", "inflows", "outflows",
+}
+STRONG_WEIGHT = 3
+WEAK_WEIGHT = 1
+HIGH_IMPACT_THRESHOLD = 3  # one STRONG term, or three corroborating WEAK ones
 
-COIN_PATTERNS = re.compile(
-    r'\b(BTC|ETH|SOL|XRP|ADA|DOGE|AVAX|DOT|MATIC|LINK|UNI|AAVE|'
-    r'Bitcoin|Ethereum|Solana|Ripple|Cardano|Dogecoin|Avalanche|Polkadot|'
-    r'Polygon|Chainlink|Uniswap|Aave)\b',
-    re.IGNORECASE,
-)
-COIN_NORMALIZE = {
-    "bitcoin": "BTC", "ethereum": "ETH", "solana": "SOL", "ripple": "XRP",
-    "cardano": "ADA", "dogecoin": "DOGE", "avalanche": "AVAX",
-    "polkadot": "DOT", "polygon": "MATIC", "chainlink": "LINK",
-    "uniswap": "UNI", "aave": "AAVE",
-}
+BULLISH_RE = compile_terms(BULLISH_WORDS)
+BEARISH_RE = compile_terms(BEARISH_WORDS)
+STRONG_RE = compile_terms(HIGH_IMPACT_STRONG)
+WEAK_RE = compile_terms(HIGH_IMPACT_WEAK)
 
 
 def _score_sentiment(title: str, description: str) -> str:
-    text = f"{title} {description}".lower()
-    bull = sum(1 for w in BULLISH_WORDS if w in text)
-    bear = sum(1 for w in BEARISH_WORDS if w in text)
-    if bull > bear and bull >= 1:
+    text = f"{title} {description}"
+    bull = distinct_hits(BULLISH_RE, text)
+    bear = distinct_hits(BEARISH_RE, text)
+    if bull > bear:
         return "bullish"
-    if bear > bull and bear >= 1:
+    if bear > bull:
         return "bearish"
     return "neutral"
 
 
 def _score_importance(title: str, description: str) -> str:
-    text = f"{title} {description}".lower()
-    hits = sum(1 for w in HIGH_IMPACT_WORDS if w in text)
-    return "high" if hits >= 1 else "normal"
-
-
-def _extract_coins(title: str, description: str) -> list[str]:
     text = f"{title} {description}"
-    matches = COIN_PATTERNS.findall(text)
-    seen: set[str] = set()
-    coins: list[str] = []
-    for m in matches:
-        normalized = COIN_NORMALIZE.get(m.lower(), m.upper())
-        if normalized not in seen:
-            seen.add(normalized)
-            coins.append(normalized)
-    return coins
+    score = (
+        distinct_hits(STRONG_RE, text) * STRONG_WEIGHT
+        + distinct_hits(WEAK_RE, text) * WEAK_WEIGHT
+    )
+    return "high" if score >= HIGH_IMPACT_THRESHOLD else "normal"
 
 
-def _strip_html(text: str) -> str:
-    if not text:
-        return ""
-    return HTML_TAG_RE.sub("", text).strip()
-
-
-def _parse_pub_date(raw: str | None) -> datetime:
-    if not raw:
-        return datetime.now(timezone.utc)
-    try:
-        dt = parsedate_to_datetime(raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except (TypeError, ValueError):
-        return datetime.now(timezone.utc)
-
-
-def _parse_rss_xml(xml_text: str, source_name: str) -> list[dict]:
-    """Parse an RSS 2.0 feed body into a list of raw article dicts.
-
-    Source IDs are sha1(guid or link) truncated to 40 chars to fit the
-    news_articles.source_id column (varchar 64).
-    """
-    items: list[dict] = []
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
-        log.warning("newspulse_rss_parse_failed", source=source_name, err=str(e))
-        return items
-
-    channel = root.find("channel")
-    if channel is None:
-        return items
-
-    for item in channel.findall("item"):
-        title = (item.findtext("title") or "").strip()
-        link = (item.findtext("link") or "").strip()
-        guid = (item.findtext("guid") or link).strip()
-        if not title or not link:
-            continue
-
-        description = _strip_html(item.findtext("description") or "")
-        pub_date = _parse_pub_date(item.findtext("pubDate"))
-        # sha1 → 40 hex chars, fits in varchar(64) and stable across runs
-        source_id = hashlib.sha1(guid.encode("utf-8")).hexdigest()
-
-        items.append({
-            "id": source_id,
-            "title": title,
-            "description": description,
-            "url": link,
-            "source_name": source_name,
-            "published_at": pub_date,
-        })
-    return items
+def _extract_coins(title: str, description: str, coin_map: CoinMap) -> list[str]:
+    return coin_map.extract(f"{title} {description}")
 
 
 async def _fetch_one_feed(client: httpx.AsyncClient, source_name: str, url: str) -> list[dict]:
+    """Fetch one feed, using stored ETag / Last-Modified for a conditional GET.
+
+    An unchanged feed answers 304 with no body, which is what makes the
+    1-minute poll cadence cheap enough to run against someone else's server.
+    """
+    headers = {"User-Agent": RSS_USER_AGENT, **_FEED_VALIDATORS.get(url, {})}
     try:
-        resp = await client.get(url, headers={"User-Agent": RSS_USER_AGENT})
+        resp = await client.get(url, headers=headers)
+        if resp.status_code == 304:
+            return []
         resp.raise_for_status()
     except httpx.HTTPError as e:
         log.warning("newspulse_rss_fetch_failed", source=source_name, err=str(e))
         return []
-    return _parse_rss_xml(resp.text, source_name)
+
+    validators = {}
+    if etag := resp.headers.get("ETag"):
+        validators["If-None-Match"] = etag
+    if last_modified := resp.headers.get("Last-Modified"):
+        validators["If-Modified-Since"] = last_modified
+    if validators:
+        _FEED_VALIDATORS[url] = validators
+    else:
+        # Feed stopped sending validators — drop stale ones so we don't pin
+        # an ETag the origin no longer honours.
+        _FEED_VALIDATORS.pop(url, None)
+
+    return parse_rss_xml(resp.text, source_name)
 
 
 async def fetch_news() -> list[dict]:
@@ -180,12 +171,17 @@ async def fetch_news() -> list[dict]:
     return articles
 
 
-def _parse_article(raw: dict) -> dict:
+def _parse_article(raw: dict, coin_map: CoinMap | None = None) -> dict:
+    """Normalise one raw item for insert.
+
+    ``sentiment``/``importance``/``coins`` already set by the caller are
+    treated as overrides: a primary source (see ``announcements.py``) knows
+    from the endpoint it came off that a Binance delisting is bearish and
+    high-impact, which the keyword scorer could only guess at.
+    """
     title = raw.get("title", "")
     description = raw.get("description", "")
-    coins = _extract_coins(title, description)
-    sentiment = _score_sentiment(title, description)
-    importance = _score_importance(title, description)
+    coins = _extract_coins(title, description, coin_map or legacy_coin_map())
     pub_dt = raw.get("published_at") or datetime.now(timezone.utc)
 
     return {
@@ -193,19 +189,28 @@ def _parse_article(raw: dict) -> dict:
         "title": title,
         "url": raw.get("url", ""),
         "source_name": raw.get("source_name", "Unknown"),
-        "sentiment": sentiment,
-        "importance": importance,
-        "coins": ",".join(coins) if coins else None,
+        "sentiment": raw.get("sentiment") or _score_sentiment(title, description),
+        "importance": raw.get("importance") or _score_importance(title, description),
+        "coins": raw.get("coins") or (",".join(coins) if coins else None),
         "published_at": pub_dt,
     }
 
 
-async def collect_news() -> int:
-    raw_articles = await fetch_news()
+async def _collect(
+    fetcher: Callable[[], Awaitable[list[dict]]], kind: str
+) -> int:
+    raw_articles = await fetcher()
     if not raw_articles:
         return 0
 
-    parsed = [_parse_article(a) for a in raw_articles if a.get("id") and a.get("title")]
+    # Loaded once per tick, not per article — the compiled matcher spans ~900
+    # tickers plus ~400 coin names.
+    coin_map = await universe.load_coin_map()
+    parsed = [
+        _parse_article(a, coin_map)
+        for a in raw_articles
+        if a.get("id") and a.get("title")
+    ]
     if not parsed:
         return 0
 
@@ -223,13 +228,23 @@ async def collect_news() -> int:
         await db.commit()
 
         if inserted:
-            new_rows = await db.execute(
-                select(NewsArticle)
-                .where(NewsArticle.notified == False)  # noqa: E712
-                .order_by(NewsArticle.published_at.desc())
-                .limit(inserted)
+            # Every unnotified row, not the `inserted` newest by publish date.
+            # The old `.order_by(published_at.desc()).limit(inserted)` silently
+            # stranded any row published older than the newest of the batch —
+            # which is the normal case now that announcement endpoints return a
+            # page of history rather than a live-only feed.
+            pending = await db.execute(
+                select(NewsArticle).where(NewsArticle.notified == False)  # noqa: E712
             )
-            for row in new_rows.scalars():
+            now = datetime.now(timezone.utc)
+            notified = 0
+            for row in pending.scalars():
+                row.notified = True
+                # Backfill guard: a first run, or a restart after downtime,
+                # pulls in items hours or days old. Record them, don't alert.
+                if now - row.published_at > NOTIFY_MAX_AGE:
+                    continue
+
                 alert_data = {
                     "id": str(row.id),
                     "title": row.title,
@@ -241,16 +256,35 @@ async def collect_news() -> int:
                     "published_at": row.published_at.isoformat(),
                 }
                 await redis_service.publish_alert("newspulse", alert_data)
+                notified += 1
 
                 if row.importance == "high":
                     from app.services.telegram_service import service as tg
                     await _notify_telegram(tg, alert_data)
-
-                row.notified = True
             await db.commit()
 
-    log.info("newspulse_collected", total=len(parsed), inserted=inserted, sources=len(RSS_FEEDS))
+            log.info(
+                "newspulse_collected",
+                kind=kind,
+                total=len(parsed),
+                inserted=inserted,
+                notified=notified,
+            )
     return inserted
+
+
+async def collect_news() -> int:
+    """Media RSS — runs on the 1-minute tick."""
+    return await _collect(fetch_news, "rss")
+
+
+async def collect_announcements() -> int:
+    """Primary exchange/regulator announcements — runs on the 2-minute tick.
+
+    Separate job because Binance BAPI throttles: see the rate-limit note in
+    ``announcements.py``.
+    """
+    return await _collect(announcements.fetch_announcements, "announcements")
 
 
 async def _notify_telegram(tg, alert_data: dict) -> None:
@@ -268,3 +302,10 @@ async def run_news_collection() -> None:
         await collect_news()
     except Exception as e:
         log.error("newspulse_collection_failed", error=str(e))
+
+
+async def run_announcement_collection() -> None:
+    try:
+        await collect_announcements()
+    except Exception as e:
+        log.error("newspulse_announcements_failed", error=str(e))
