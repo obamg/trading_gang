@@ -177,6 +177,20 @@ async def get_market_data(symbol: str) -> MarketData | None:
     if kl is None or not kl.get("bars"):
         return None
 
+    funding = await get_funding(symbol)
+
+    return MarketData(
+        symbol=symbol, bars=kl["bars"], live_bar=kl.get("live"), funding=funding
+    )
+
+
+async def get_funding(symbol: str) -> list[tuple[int, float]] | None:
+    """Funding history for one symbol, cache-first (15-min TTL).
+
+    Split out of get_market_data so newsevent can accrue funding at close
+    time without also paying for the 1h kline fetch it doesn't use.
+    """
+    r = redis_service.get_redis()
     funding: list[tuple[int, float]] | None = None
     fraw = await r.get(FUNDING_KEY.format(symbol=symbol))
     if fraw is not None:
@@ -192,10 +206,7 @@ async def get_market_data(symbol: str) -> MarketData | None:
                 json.dumps(funding),
                 ex=FUNDING_TTL_S,
             )
-
-    return MarketData(
-        symbol=symbol, bars=kl["bars"], live_bar=kl.get("live"), funding=funding
-    )
+    return funding
 
 
 def _decode(v):

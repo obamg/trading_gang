@@ -140,7 +140,7 @@ async def fill_pending_order(
     trade.paper_equity_at_entry = paper_equity
     await db.commit()
 
-    await equity.increment_concurrent()
+    await equity.increment_concurrent(equity.ledger_for(trade.strategy))
     await redis_service.publish_alert(
         "majorsbot",
         {
@@ -257,7 +257,7 @@ async def open_market_trade(
     await db.commit()
     await db.refresh(trade)
 
-    await equity.increment_concurrent()
+    await equity.increment_concurrent(equity.ledger_for(strategy))
     alert_payload = {
         "type": "trade_opened",
         "id": str(trade.id),
@@ -329,7 +329,7 @@ async def take_partial_profit(
     trade.partial_pnl_usd = pnl
     await db.commit()
 
-    await equity.add_to_equity(pnl)
+    await equity.add_to_equity(pnl, equity.ledger_for(trade.strategy))
     await redis_service.publish_alert(
         "majorsbot",
         {
@@ -423,8 +423,9 @@ async def close_trade(
     await db.commit()
 
     # The partial leg hit equity when it filled — only the runner (+funding) here.
-    await equity.add_to_equity(runner_net)
-    await equity.decrement_concurrent()
+    ledger = equity.ledger_for(trade.strategy)
+    await equity.add_to_equity(runner_net, ledger)
+    await equity.decrement_concurrent(ledger)
 
     await redis_service.publish_alert(
         "majorsbot",

@@ -75,9 +75,13 @@ NEWSEVENT_TRAIL_ARM_R = Decimal("1.0")
 NEWSEVENT_TRAIL_DIST_R = Decimal("1.0")
 NEWSEVENT_MAX_HOLD_BARS = 72          # 6h of 5m bars — news edge decays fast
 NEWSEVENT_MIN_TRADES = 30             # pre-committed evaluation gate
-# Bybit linear-perp maintenance margin for majors. Only used when the
-# protective stop is disabled, where liquidation becomes the real exit.
+# Bybit linear-perp maintenance margin. Only used when the protective stop is
+# disabled, where liquidation becomes the real exit. 0.5% is tier-1 for
+# majors; small caps run 1%+ tier-1 and a large notional may sit in tier 2-3,
+# so non-majors get the higher rate. A crude two-bucket model, biased the
+# honest way: liquidation strikes EARLIER than the optimistic constant said.
 NEWSEVENT_MAINTENANCE_MARGIN_RATE = Decimal("0.005")
+NEWSEVENT_MMR_NON_MAJOR = Decimal("0.01")
 
 CLOSE_LIQUIDATION = "liquidated"
 CLOSE_STOP = "stop"
@@ -242,6 +246,22 @@ def liquidation_price(
     move = Decimal("1") / leverage - mmr
     if move <= 0:
         return None
+    return entry * (Decimal("1") - move) if direction == "long" else entry * (Decimal("1") + move)
+
+
+def bankruptcy_price(direction: str, entry: Decimal, leverage: Decimal) -> Decimal | None:
+    """Where the position's margin is fully gone: entry ∓ entry/leverage.
+
+    A real Bybit isolated liquidation does not exit at the liquidation price —
+    the engine takes over at liq and the trader's realized outcome is
+    approximately the bankruptcy price (full margin loss; any remainder goes
+    to the insurance fund, not back to the account). Booking liquidations at
+    the liq price under-costs each one by ~mmr × leverage of equity, which at
+    high leverage flatters the strategy on exactly its worst outcome.
+    """
+    if entry <= 0 or leverage <= 1:
+        return None
+    move = Decimal("1") / leverage
     return entry * (Decimal("1") - move) if direction == "long" else entry * (Decimal("1") + move)
 
 
