@@ -218,6 +218,10 @@ class TelegramService:
         if await self.is_paused(chat_id):
             return False
         text = self._format_alert(module, alert_data)
+        if not text:
+            # Formatter deliberately muted this event type (e.g. majorsbot
+            # order lifecycle noise — only entries go to Telegram).
+            return False
         try:
             await self._app.bot.send_message(
                 chat_id=chat_id,
@@ -443,6 +447,37 @@ class TelegramService:
                 f"Vol burst: `{vol_x}` | Funding: `{funding_str}`\n"
                 f"_Innovation Zone — wave forming_"
             )
+
+        if module == "majorsbot":
+            # Entries only — order_placed / cancelled / partial / closed would
+            # be pure noise at Telegram cadence. Empty string = muted
+            # (send_alert short-circuits on it); WS still gets every event.
+            if t != "trade_opened":
+                return ""
+            direction = (d.get("direction") or "?").upper()
+            emoji = "🟢" if direction == "LONG" else "🔴"
+            strat = d.get("strategy", "?")
+            entry = d.get("entry_price")
+            qty = d.get("qty")
+            try:
+                notional = float(entry) * float(qty)
+            except (TypeError, ValueError):
+                notional = None
+            # A stopless (liquidation-exit) entry says so explicitly — the
+            # number after "Liq" is where the position dies, not a stop.
+            stop_label = "Liq" if d.get("stop_kind") == "liquidation" else "Stop"
+            lev = d.get("leverage")
+            lev_str = f" | Lev: `{float(lev):.1f}x`" if lev is not None else ""
+            lines = [
+                f"🤖 *MajorsBot Entry — {sym}* {emoji}",
+                f"`{strat}` {direction} @ `{entry}` | {stop_label}: `{d.get('stop_price', '?')}`",
+                f"Notional: `${_fmt_usd(notional)}`{lev_str}",
+            ]
+            if d.get("news_source"):
+                gap = d.get("leg_gap_s")
+                gap_str = f" ({int(gap)}s gap)" if gap is not None else ""
+                lines.append(f"News: `{d['news_source']}`{gap_str}")
+            return "\n".join(lines)
 
         return f"📣 *{module.title()} — {sym}*\n`{t or 'alert'}`"
 
