@@ -23,7 +23,13 @@ from app.services import redis_service
 from app.services.telegram_service import service as telegram_service
 
 UNREAD_BUFFER_SIZE = 20
-ALERT_MODULES = ("radarx", "whaleradar", "gemradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch")
+ALERT_MODULES = ("radarx", "whaleradar", "gemradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch", "majorsbot")
+
+# Modules whose alerts bypass the watchlist gate. majorsbot trades its own
+# universe (incl. news-driven symbols like STORJUSDT that nobody watchlists);
+# the user's own bot entering a position must never be silently swallowed
+# because the symbol isn't on a list.
+WATCHLIST_EXEMPT_MODULES = frozenset({"majorsbot"})
 
 
 class ConnectionManager:
@@ -135,6 +141,9 @@ class ConnectionManager:
         event = {"type": event_type, "data": payload}
 
         symbol = payload.get("symbol") if isinstance(payload, dict) else None
+
+        if module in WATCHLIST_EXEMPT_MODULES:
+            symbol = None  # disables the watchlist gate for WS + Telegram below
 
         async with AsyncSessionLocal() as db:
             # WebSocket delivery to connected users

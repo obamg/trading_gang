@@ -262,6 +262,7 @@ async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict) -> bool:
     # NOT NULL column still carries a meaningful number.
     exit_stop = ref_stop if stop_enabled else (liq if liq is not None else ref_stop)
 
+    lag_s = abs(int(vol_leg["ts_ms"]) - int(news_leg["ts_ms"])) / 1000
     trade = await executor.open_market_trade(
         db,
         symbol=symbol,
@@ -274,11 +275,18 @@ async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict) -> bool:
         initial_stop_price=ref_stop,
         qty=qty,
         paper_equity=eq,
+        alert_extra={
+            "leverage": float(leverage),
+            "stop_kind": "liquidation" if (not stop_enabled and liq is not None) else "stop",
+            "news_source": news_leg.get("source"),
+            "news_title": news_leg.get("title"),
+            "leg_order": "news_first" if news_leg["ts_ms"] <= vol_leg["ts_ms"] else "volume_first",
+            "leg_gap_s": lag_s,
+        },
     )
     await r.set(COOLDOWN_KEY.format(symbol=symbol), "1", ex=COOLDOWN_S)
     await clear_legs(symbol)
 
-    lag_s = abs(int(vol_leg["ts_ms"]) - int(news_leg["ts_ms"])) / 1000
     log.info(
         "newsevent_entered",
         id=str(trade.id),

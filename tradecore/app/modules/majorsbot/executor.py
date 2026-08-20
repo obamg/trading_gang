@@ -218,6 +218,7 @@ async def open_market_trade(
     funding_rate: Decimal | None = None,
     funding_pctile: Decimal | None = None,
     initial_stop_price: Decimal | None = None,
+    alert_extra: dict | None = None,
 ) -> MajorsBotTrade:
     """Direct market open (fundingfade, newsevent). Taker entry fee at close.
 
@@ -257,22 +258,25 @@ async def open_market_trade(
     await db.refresh(trade)
 
     await equity.increment_concurrent()
-    await redis_service.publish_alert(
-        "majorsbot",
-        {
-            "type": "trade_opened",
-            "id": str(trade.id),
-            "symbol": symbol,
-            "strategy": strategy,
-            "direction": direction,
-            "entry_mode": "market",
-            "entry_price": float(entry_price),
-            "stop_price": float(stop_price),
-            "qty": float(qty),
-            "funding_rate": float(funding_rate) if funding_rate is not None else None,
-            "entry_at": now.isoformat(),
-        },
-    )
+    alert_payload = {
+        "type": "trade_opened",
+        "id": str(trade.id),
+        "symbol": symbol,
+        "strategy": strategy,
+        "direction": direction,
+        "entry_mode": "market",
+        "entry_price": float(entry_price),
+        "stop_price": float(stop_price),
+        "qty": float(qty),
+        "funding_rate": float(funding_rate) if funding_rate is not None else None,
+        "entry_at": now.isoformat(),
+    }
+    # Strategy-specific context for the Telegram/WS card (e.g. newsevent's
+    # leverage, stop_kind, news source). Core keys always win — an extra can
+    # add fields but never overwrite one.
+    for k, v in (alert_extra or {}).items():
+        alert_payload.setdefault(k, v)
+    await redis_service.publish_alert("majorsbot", alert_payload)
     log.info(
         "majorsbot_trade_opened",
         id=str(trade.id),
