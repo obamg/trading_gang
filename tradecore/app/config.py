@@ -170,6 +170,20 @@ class Settings(BaseSettings):
     majorsbot_max_concurrent: int = 6              # open positions across both strategies
     majorsbot_volevent_enabled: bool = True        # F4-A: vol-event momentum retrace
     majorsbot_fundingfade_enabled: bool = True     # F1-B: funding-extreme fade (99th pctile)
+    # newsevent: two-leg news + volume confirmation. Off by default — it has
+    # no backtest behind it, unlike the two above.
+    majorsbot_newsevent_enabled: bool = False
+    # Notional cap as a MULTIPLE of equity, i.e. effective leverage: 1.0 = 1x,
+    # 20.0 = 20x. Separate from majorsbot_position_size_pct so newsevent can be
+    # sized without touching volevent's live forward test. Leverage is still an
+    # *outcome* of risk% / stop-distance — this is the ceiling, not the target.
+    majorsbot_newsevent_position_size_pct: float = 1.0
+    majorsbot_newsevent_risk_per_trade_pct: float = 0.0025
+    majorsbot_newsevent_max_concurrent: int = 3
+    # False = no protective stop; the position runs to the trail, the max-hold
+    # cap, or LIQUIDATION. Sizing then comes purely from the notional cap,
+    # since there is no stop distance to normalise risk against.
+    majorsbot_newsevent_stop_enabled: bool = False
     majorsbot_maker_fee_pct: float = 0.0002        # limit entries + limit partial TPs
     majorsbot_taker_fee_pct: float = 0.0006        # market entries + market-style exits
     majorsbot_slippage_pct: float = 0.0002         # adverse slip on market-style exits only

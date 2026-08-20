@@ -27,6 +27,7 @@ from decimal import Decimal
 
 VOLEVENT = "volevent"
 FUNDINGFADE = "fundingfade"
+NEWSEVENT = "newsevent"
 
 # --- volevent constants (bake-off F4, variant A) ---
 VOLEVENT_LOOKBACK_BARS = 720          # trailing 30d of 1h bars, window ends before trigger
@@ -52,6 +53,33 @@ FF_TRAIL_ARM_R = Decimal("1.0")
 FF_ATR_WINDOW = 24
 FF_MAX_ENTRY_LAG_MS = 2 * 3_600_000   # skip events discovered >2h late
 
+# ---- newsevent (two-leg news + volume confirmation) ----
+#
+# WARNING: unlike volevent/fundingfade, these parameters are NOT ported from a
+# backtest — no news-event bake-off has been run. They are deliberate starting
+# values for a forward test, and the n>=NEWSEVENT_MIN_TRADES gate is what
+# decides whether the strategy survives. Do not read them as validated.
+#
+# Both legs sit BELOW volevent's 3x/3x bar on purpose: the whole premise of
+# two-way confirmation is that corroboration from the other leg substitutes
+# for individual statistical significance.
+NEWSEVENT_BAR_MS = 300_000            # 5m bars — 1h cannot resolve a 15m window
+NEWSEVENT_LOOKBACK_BARS = 288         # trailing 24h of 5m bars
+NEWSEVENT_RET_ATR_MULT = 1.5          # vs volevent 3.0
+NEWSEVENT_VOL_MULT = 2.0              # vs volevent 3.0
+NEWSEVENT_PAIR_WINDOW_S = 15 * 60     # max gap between legs, EITHER order
+NEWSEVENT_MIN_STOP_PCT = Decimal("0.005")
+NEWSEVENT_TP_R = Decimal("1.5")
+NEWSEVENT_PARTIAL_FRACTION = Decimal("0.5")
+NEWSEVENT_TRAIL_ARM_R = Decimal("1.0")
+NEWSEVENT_TRAIL_DIST_R = Decimal("1.0")
+NEWSEVENT_MAX_HOLD_BARS = 72          # 6h of 5m bars — news edge decays fast
+NEWSEVENT_MIN_TRADES = 30             # pre-committed evaluation gate
+# Bybit linear-perp maintenance margin for majors. Only used when the
+# protective stop is disabled, where liquidation becomes the real exit.
+NEWSEVENT_MAINTENANCE_MARGIN_RATE = Decimal("0.005")
+
+CLOSE_LIQUIDATION = "liquidated"
 CLOSE_STOP = "stop"
 CLOSE_TRAIL = "trail"
 CLOSE_FUNDING_NORM = "funding_norm"
@@ -111,6 +139,120 @@ def volevent_signal(bars: list[dict]) -> dict | None:
         "mean_tr_pct": ap,
         "vol_mult": (bar["v"] / med) if med else None,
     }
+
+
+def newsevent_volume_leg(bars: list[dict]) -> dict | None:
+    """Evaluate the LAST completed 5m bar as a volume/price spike.
+
+    Same shape as ``volevent_signal`` but on 5m bars and at a lower bar, since
+    the news leg supplies the corroboration. Returns None or a leg dict.
+    """
+    n = len(bars)
+    i = n - 1
+    if n < NEWSEVENT_LOOKBACK_BARS + 2:
+        return None
+    from app.modules.majorsbot import data as _data  # pure helpers only
+
+    ap = _data.mean_tr_pct(bars, i, NEWSEVENT_LOOKBACK_BARS)
+    if ap is None or ap <= 0:
+        return None
+    bar = bars[i]
+    if bar["o"] <= 0:
+        return None
+    ret = (bar["c"] - bar["o"]) / bar["o"]
+    if abs(ret) < NEWSEVENT_RET_ATR_MULT * ap:
+        return None
+    med = _data.median_volume(bars, i, NEWSEVENT_LOOKBACK_BARS)
+    if med is None or med <= 0 or bar["v"] < NEWSEVENT_VOL_MULT * med:
+        return None
+    return {
+        "direction": "long" if ret > 0 else "short",
+        "bar_ts": int(bar["t"]),
+        "bar_high": bar["h"],
+        "bar_low": bar["l"],
+        "close": bar["c"],
+        "ret": ret,
+        "mean_tr_pct": ap,
+        "vol_mult": (bar["v"] / med) if med else None,
+    }
+
+
+def newsevent_direction(price_direction: str, news_sentiment: str | None) -> str | None:
+    """Resolve the two legs into a tradeable direction, or None to stand down.
+
+    Price is primary — it is what the market is actually doing, and it is the
+    leg we observe in real time. News acts as a veto: a bullish headline
+    against a collapsing price (or vice versa) means the two legs disagree
+    about the same event, which is precisely the case not to take.
+    """
+    if price_direction not in ("long", "short"):
+        return None
+    if news_sentiment in (None, "", "neutral"):
+        return price_direction
+    wanted = "long" if news_sentiment == "bullish" else "short"
+    return price_direction if wanted == price_direction else None
+
+
+def newsevent_stop(
+    direction: str, entry: Decimal, trigger_extreme: Decimal
+) -> tuple[Decimal, Decimal]:
+    """(stop, risk): the spike bar's adverse extreme, floored at 0.5% of entry.
+
+    Floor is half volevent's because a 5m bar's range is correspondingly
+    smaller; without it a quiet spike bar would produce a near-zero stop
+    distance and, through risk-normalized sizing, an absurd qty.
+    """
+    risk = max(abs(entry - trigger_extreme), NEWSEVENT_MIN_STOP_PCT * entry)
+    stop = entry - risk if direction == "long" else entry + risk
+    return stop, risk
+
+
+def effective_leverage(notional: Decimal, equity: Decimal) -> Decimal:
+    """Notional as a multiple of equity. This is the number that decides how
+    far price can move before the position is gone."""
+    if equity <= 0:
+        return Decimal("0")
+    return notional / equity
+
+
+def liquidation_price(
+    direction: str,
+    entry: Decimal,
+    leverage: Decimal,
+    mmr: Decimal = NEWSEVENT_MAINTENANCE_MARGIN_RATE,
+) -> Decimal | None:
+    """Isolated-margin liquidation price.
+
+    The position dies once the adverse move eats the margin down to the
+    maintenance requirement, i.e. at (1/leverage − mmr) away from entry. At
+    20x that is ~4.5%; at 1x it is effectively unreachable and this returns
+    None.
+
+    This exists because running without a protective stop does not mean
+    running without an exit — it means the exchange chooses it. A paper bot
+    that omits this reports recoveries from drawdowns that would already have
+    been closed out, which flatters the strategy rather than testing it.
+    """
+    if entry <= 0 or leverage <= 1:
+        # At or below 1x the position is fully collateralised: "liquidation"
+        # would need price to approach zero, so there is nothing to model.
+        # Guarding on leverage (not on the derived move) keeps that explicit —
+        # the formula alone yields a bogus 99.5%-away price at exactly 1x.
+        return None
+    move = Decimal("1") / leverage - mmr
+    if move <= 0:
+        return None
+    return entry * (Decimal("1") - move) if direction == "long" else entry * (Decimal("1") + move)
+
+
+def legs_paired(vol_ts: int, news_ts: int, window_s: int = NEWSEVENT_PAIR_WINDOW_S) -> bool:
+    """True when the two legs fall inside the window, in EITHER order.
+
+    Symmetric by design: a volume spike that precedes the announcement is the
+    market front-running it, and an announcement that precedes the spike is
+    the market reacting to it. Both are the same event.
+    """
+    return abs(vol_ts - news_ts) <= window_s * 1000
 
 
 def limit_fill_price(direction: str, bar_open: Decimal, limit: Decimal) -> Decimal:

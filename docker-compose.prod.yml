@@ -114,6 +114,20 @@ services:
       # R-multiples are risk-normalized, so this does NOT affect the n≥30 gate.
       MAJORSBOT_RISK_PER_TRADE_PCT: ${MAJORSBOT_RISK_PER_TRADE_PCT:-0.01}
       MAJORSBOT_POSITION_SIZE_PCT: ${MAJORSBOT_POSITION_SIZE_PCT:-0.5}
+      # newsevent (2026-08-20): two-leg news + volume confirmation, 15-min
+      # window, either order. NOT backtested — forward test only, gate n>=30
+      # on net R. Stops are OFF by request, so liquidation is the exit and is
+      # modelled explicitly.
+      MAJORSBOT_NEWSEVENT_ENABLED: ${MAJORSBOT_NEWSEVENT_ENABLED:-true}
+      MAJORSBOT_NEWSEVENT_STOP_ENABLED: ${MAJORSBOT_NEWSEVENT_STOP_ENABLED:-false}
+      # 10x notional. Measured on 533 real volume-leg events: 4.7% of entries
+      # hit liquidation (9.5% adverse move) within the 6h hold, each costing
+      # ~95% of equity => ~24% chance of reaching n=30 without one.
+      MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT: ${MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT:-10}
+      # Must be 1: notional = 10x equity means margin = the whole account, so
+      # a second concurrent position is not fundable. Paper does not enforce
+      # margin, so a higher value would silently simulate the impossible.
+      MAJORSBOT_NEWSEVENT_MAX_CONCURRENT: ${MAJORSBOT_NEWSEVENT_MAX_CONCURRENT:-1}
       SCHEDULER_ENABLED: "false"
       RUN_MIGRATIONS: "1"
       RUN_SEED: "0"
@@ -171,6 +185,20 @@ services:
       # R-multiples are risk-normalized, so this does NOT affect the n≥30 gate.
       MAJORSBOT_RISK_PER_TRADE_PCT: ${MAJORSBOT_RISK_PER_TRADE_PCT:-0.01}
       MAJORSBOT_POSITION_SIZE_PCT: ${MAJORSBOT_POSITION_SIZE_PCT:-0.5}
+      # newsevent (2026-08-20): two-leg news + volume confirmation, 15-min
+      # window, either order. NOT backtested — forward test only, gate n>=30
+      # on net R. Stops are OFF by request, so liquidation is the exit and is
+      # modelled explicitly.
+      MAJORSBOT_NEWSEVENT_ENABLED: ${MAJORSBOT_NEWSEVENT_ENABLED:-true}
+      MAJORSBOT_NEWSEVENT_STOP_ENABLED: ${MAJORSBOT_NEWSEVENT_STOP_ENABLED:-false}
+      # 10x notional. Measured on 533 real volume-leg events: 4.7% of entries
+      # hit liquidation (9.5% adverse move) within the 6h hold, each costing
+      # ~95% of equity => ~24% chance of reaching n=30 without one.
+      MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT: ${MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT:-10}
+      # Must be 1: notional = 10x equity means margin = the whole account, so
+      # a second concurrent position is not fundable. Paper does not enforce
+      # margin, so a higher value would silently simulate the impossible.
+      MAJORSBOT_NEWSEVENT_MAX_CONCURRENT: ${MAJORSBOT_NEWSEVENT_MAX_CONCURRENT:-1}
       SCHEDULER_ENABLED: "true"
       WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}

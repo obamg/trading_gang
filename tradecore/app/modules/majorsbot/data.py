@@ -30,13 +30,17 @@ from app.logging_config import log
 from app.services import redis_service
 
 H1_MS = 3_600_000
+M5_MS = 300_000
 
 KLINES_KEY = "majorsbot:klines:{symbol}"
+M5_KLINES_KEY = "majorsbot:klines5m:{symbol}"
 FUNDING_KEY = "majorsbot:funding:{symbol}"
 KLINES_TTL_S = 2 * 3600     # safety TTL; freshness is decided by bar coverage
+M5_KLINES_TTL_S = 900
 FUNDING_TTL_S = 900
 
 KLINE_LIMIT = 1000          # ≈41 days of 1h bars — covers the 720-bar lookback
+M5_KLINE_LIMIT = 1000       # ≈3.5 days of 5m bars — covers the 288-bar lookback
 FUNDING_LIMIT = 200         # ≈66 days of 8h events — covers the 90-event window
 _TIMEOUT_S = 10.0
 
@@ -196,6 +200,108 @@ async def get_market_data(symbol: str) -> MarketData | None:
 
 def _decode(v):
     return v.decode() if isinstance(v, bytes) else v
+
+
+# ---------- 5-minute bars (newsevent only) ----------
+#
+# volevent/fundingfade run on 1h bars and must keep doing so — their
+# parameters mirror a 12-month backtest. newsevent pairs a volume leg with a
+# news leg inside a 15-minute window, which 1h bars simply cannot resolve, so
+# it gets its own faster series. Nothing above this line changes.
+
+
+async def _fetch_klines_5m(symbol: str) -> tuple[list[dict], dict | None] | None:
+    """Same shape as ``_fetch_klines`` but interval=5. (completed, live)."""
+    url = f"{app_settings.bybit_rest_url}/v5/market/kline"
+    params = {
+        "category": "linear",
+        "symbol": symbol,
+        "interval": "5",
+        "limit": M5_KLINE_LIMIT,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            payload = r.json()
+    except Exception as e:
+        log.warning("majorsbot_klines5m_fetch_failed", symbol=symbol, err=str(e))
+        return None
+    if not isinstance(payload, dict) or payload.get("retCode") != 0:
+        log.warning(
+            "majorsbot_klines5m_bad_response",
+            symbol=symbol,
+            ret_code=payload.get("retCode") if isinstance(payload, dict) else None,
+        )
+        return None
+
+    rows = (payload.get("result") or {}).get("list") or []
+    now_ms = int(time.time() * 1000)
+    bars: list[dict] = []
+    live: dict | None = None
+    for row in reversed(rows):  # Bybit returns newest-first → flip ascending
+        try:
+            t = int(row[0])
+            bar = {
+                "t": t,
+                "o": float(row[1]),
+                "h": float(row[2]),
+                "l": float(row[3]),
+                "c": float(row[4]),
+                "v": float(row[5]),
+            }
+        except (IndexError, TypeError, ValueError):
+            continue
+        if t + M5_MS <= now_ms:
+            bars.append(bar)
+        else:
+            live = {"t": t, "o": bar["o"]}
+    return bars, live
+
+
+def _last_completed_5m_start(now_ms: int) -> int:
+    return (now_ms // M5_MS) * M5_MS - M5_MS
+
+
+async def get_fast_market_data(symbol: str) -> MarketData | None:
+    """Completed 5-minute bars for one symbol, cache-first.
+
+    Refetched only when the cache lacks the latest completed 5m bar, so the
+    1-minute newsevent tick costs at most one REST call per symbol per 5
+    minutes. ``funding`` is always None here — newsevent does not use it.
+    """
+    r = redis_service.get_redis()
+    now_ms = int(time.time() * 1000)
+    key = M5_KLINES_KEY.format(symbol=symbol)
+
+    kl: dict | None = None
+    raw = await r.get(key)
+    if raw is not None:
+        try:
+            cached = json.loads(_decode(raw))
+            bars = cached.get("bars") or []
+            if bars and int(bars[-1]["t"]) >= _last_completed_5m_start(now_ms):
+                kl = cached
+        except (ValueError, KeyError, TypeError):
+            raw = None
+    if kl is None:
+        fetched = await _fetch_klines_5m(symbol)
+        if fetched is not None:
+            bars, live = fetched
+            kl = {"bars": bars, "live": live}
+            await r.set(key, json.dumps(kl), ex=M5_KLINES_TTL_S)
+        elif raw is not None:
+            try:
+                kl = json.loads(_decode(raw))
+                log.warning("majorsbot_klines5m_stale_cache_used", symbol=symbol)
+            except ValueError:
+                kl = None
+    if kl is None or not kl.get("bars"):
+        return None
+
+    return MarketData(
+        symbol=symbol, bars=kl["bars"], live_bar=kl.get("live"), funding=None
+    )
 
 
 # ---------- pure rolling-window helpers (bake-off parity) ----------
