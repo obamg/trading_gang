@@ -5,7 +5,7 @@ a MajorsBot trade opens, so the evaluation gate can test crowding/regime
 hypotheses against contemporaneous data. Nothing reads these to trade.
 
 Revision ID: 023_trade_context
-Revises: 022_drop_bot_tables
+Revises: 018_chainpulse_snapshots
 Create Date: 2026-08-21
 """
 import sqlalchemy as sa
@@ -13,7 +13,12 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "023_trade_context"
-down_revision = "022_drop_bot_tables"
+# NOT 022: the chain is non-linear at the tail — 018_chainpulse was merged
+# AFTER 022 and declares 022 as its parent, so 018 is the true head despite
+# its filename. Pointing 023 at 022 created a second head and took prod down
+# (alembic refuses "upgrade head" with multiple heads; the api entrypoint
+# crash-looped). Check `alembic heads`, not filenames, before chaining.
+down_revision = "018_chainpulse_snapshots"
 branch_labels = None
 depends_on = None
 
