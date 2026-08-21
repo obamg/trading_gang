@@ -105,6 +105,9 @@ class FakeRedis:
             h.update({k: str(v) for k, v in mapping.items()})
         return len(mapping or {})
 
+    async def hget(self, key: str, field: str):
+        return self._hashes.get(key, {}).get(field)
+
     async def smembers(self, key: str):
         return self._sets.get(key, set())
 

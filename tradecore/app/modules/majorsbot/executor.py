@@ -157,6 +157,15 @@ async def fill_pending_order(
             "entry_at": now.isoformat(),
         },
     )
+
+    # Observational regime/crowding stamp (CMCPulse). Best-effort by design:
+    # the function swallows everything internally, and the guard here covers
+    # even an import failure — an entry must never be lost to context.
+    try:
+        from app.modules.cmcpulse import collector as cmcpulse
+        await cmcpulse.snapshot_trade_context(db, trade)
+    except Exception as e:
+        log.warning("trade_context_hook_failed", trade_id=str(trade.id), err=str(e))
     log.info(
         "majorsbot_trade_filled",
         id=str(trade.id),
@@ -277,6 +286,15 @@ async def open_market_trade(
     for k, v in (alert_extra or {}).items():
         alert_payload.setdefault(k, v)
     await redis_service.publish_alert("majorsbot", alert_payload)
+
+    # Observational regime/crowding stamp (CMCPulse). Best-effort by design:
+    # the function swallows everything internally, and the guard here covers
+    # even an import failure — an entry must never be lost to context.
+    try:
+        from app.modules.cmcpulse import collector as cmcpulse
+        await cmcpulse.snapshot_trade_context(db, trade)
+    except Exception as e:
+        log.warning("trade_context_hook_failed", trade_id=str(trade.id), err=str(e))
     log.info(
         "majorsbot_trade_opened",
         id=str(trade.id),

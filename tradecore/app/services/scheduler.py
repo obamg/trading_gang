@@ -23,6 +23,7 @@ from app.modules.sentimentpulse import collector as sentiment_collector
 from app.modules.flowpulse import detector as flowpulse_detector
 from app.modules.newspulse import collector as newspulse_collector
 from app.modules.newspulse import universe as newspulse_universe
+from app.modules.cmcpulse import collector as cmcpulse_collector
 from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.walletwatch import detector as walletwatch_detector
@@ -224,6 +225,27 @@ def start_scheduler() -> AsyncIOScheduler:
         id="newspulse_announcements",
         coalesce=True,
         max_instances=1,
+    )
+    # CMCPulse — free regime/crowding context (observational only; stamped
+    # onto bot trades at entry). Both jobs run once at boot so the Redis keys
+    # exist before the first trade of the day.
+    sched.add_job(
+        cmcpulse_collector.run_indices_job,
+        "interval",
+        hours=4,
+        id="cmcpulse_indices",
+        coalesce=True,
+        max_instances=1,
+        next_run_time=datetime.now(timezone.utc),
+    )
+    sched.add_job(
+        cmcpulse_collector.run_trending_job,
+        "interval",
+        hours=1,
+        id="cmcpulse_trending",
+        coalesce=True,
+        max_instances=1,
+        next_run_time=datetime.now(timezone.utc),
     )
     # Coin-attribution universe: exchange tickers + CoinGecko top-500 names.
     # Cached in Redis with a 7-day TTL, so a failed refresh degrades slowly.

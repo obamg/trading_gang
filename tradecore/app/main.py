@@ -40,6 +40,7 @@ from app.modules.riskcalc.router import router as riskcalc_router
 from app.modules.sentimentpulse.router import router as sentiment_router
 from app.modules.flowpulse.router import router as flowpulse_router
 from app.modules.newspulse.router import router as newspulse_router
+from app.modules.cmcpulse.router import router as cmcpulse_router
 from app.modules.whaleradar.router import router as whaleradar_router
 from app.modules.exchanges.router import router as exchanges_router
 from app.modules.walletwatch.router import router as walletwatch_router
@@ -257,6 +258,7 @@ app.include_router(oracle_router)
 app.include_router(riskcalc_router)
 app.include_router(performance_router)
 app.include_router(newspulse_router)
+app.include_router(cmcpulse_router)
 app.include_router(flowpulse_router)
 app.include_router(exchanges_router)
 app.include_router(walletwatch_router)
