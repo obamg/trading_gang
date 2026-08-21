@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.models.majorsbot import MajorsBotTrade
 from app.modules.majorsbot import data, strategies
 from app.modules.majorsbot.strategies import PositionState
 
@@ -335,6 +336,12 @@ class FakeDB:
     def add(self, obj) -> None:
         self.added.append(obj)
 
+    @property
+    def trades(self):
+        # The CMCPulse hook adds a TradeContextSnapshot row per entry;
+        # trade-count assertions must not count those.
+        return [o for o in self.added if isinstance(o, MajorsBotTrade)]
+
     async def commit(self) -> None:
         self.commits += 1
 
@@ -611,8 +618,8 @@ async def test_volevent_signal_places_pending_once_per_bar(engine_env):
     db = FakeDB()
     out = await engine._process_symbol(db, "BTCUSDT", now)
     assert out["placed"] == 1
-    assert len(db.added) == 1
-    trade = db.added[0]
+    assert len(db.trades) == 1
+    trade = db.trades[0]
     assert trade.status == "pending"
     assert trade.strategy == "volevent"
     assert trade.direction == "long"
@@ -777,7 +784,7 @@ async def test_fundingfade_enters_short_on_extreme_event(engine_env, fake_redis)
     db = FakeDB()
     out = await engine._process_symbol(db, "BTCUSDT", _dt(event_ts + H1 + 5 * 60_000))
     assert out["opened"] == 1
-    trade = db.added[0]
+    trade = db.trades[0]
     assert trade.strategy == "fundingfade"
     assert trade.direction == "short"
     assert trade.entry_price == Decimal("100")  # event-bar open
@@ -800,7 +807,7 @@ async def test_fundingfade_event_not_reentered_on_next_bar(engine_env):
 
     db = FakeDB()
     await engine._process_symbol(db, "BTCUSDT", _dt(event_ts + H1))
-    assert len(db.added) == 1
+    assert len(db.trades) == 1
     # A NEW completed bar arrives (gate reopens) but the event was seen.
     bars2 = bars + [_bar(event_ts + H1, 100, 100.5, 99.5, 100)]
     engine_env.md = data.MarketData(symbol="BTCUSDT", bars=bars2, funding=funding)
