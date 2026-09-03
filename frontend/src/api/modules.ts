@@ -538,11 +538,14 @@ export const wavewatchApi = {
 };
 
 // ---------- MajorsBot ----------
-export type MajorsBotStrategy = "volevent" | "fundingfade";
+export type MajorsBotStrategy = "volevent" | "fundingfade" | "newsevent";
 export interface MajorsBotConfig {
   symbols: string[];
   volevent_enabled: boolean;
   fundingfade_enabled: boolean;
+  newsevent_enabled: boolean;
+  newsevent_primary_only: boolean;
+  newsevent_retrace_entry: boolean;
   paper_equity_initial: number;
   risk_per_trade_pct: number;
   position_size_pct: number;
@@ -593,6 +596,7 @@ export interface MajorsBotTrade {
   realized_pnl_usd: number | null;
   realized_r: number | null;
   realized_r_net: number | null;
+  realized_pct_equity: number | null;
   fees_usd: number | null;
   funding_pnl_usd: number | null;
   funding_rate_at_entry: number | null;
@@ -609,6 +613,13 @@ export interface MajorsBotAnalyticsRow {
   realized_r_net: number;
   avg_r_net: number | null;
   expectancy_r_net: number | null;
+  /**
+   * Realized P&L as a % of equity at entry. The honest expectancy metric for a
+   * STOPLESS strategy, where 1R is a phantom unit that never executes — see the
+   * /majorsbot/analytics docstring.
+   */
+  pct_equity: number;
+  avg_pct_equity: number | null;
   fees_usd: number;
   funding_pnl_usd: number;
 }

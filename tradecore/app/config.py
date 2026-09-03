@@ -175,8 +175,15 @@ class Settings(BaseSettings):
     majorsbot_newsevent_enabled: bool = False
     # Notional cap as a MULTIPLE of equity, i.e. effective leverage: 1.0 = 1x,
     # 20.0 = 20x. Separate from majorsbot_position_size_pct so newsevent can be
-    # sized without touching volevent's live forward test. Leverage is still an
-    # *outcome* of risk% / stop-distance — this is the ceiling, not the target.
+    # sized without touching volevent's live forward test.
+    #
+    # With stops OFF this is not a ceiling, it IS the size — the risk% knob is
+    # inert, every position lands at exactly this leverage, and liquidation is
+    # the only loss cap. Prod ran 10x through the first 11 trades and took
+    # −57.6% and −48.3% of the book on two of them; XRP reached −79.3% (a 7.9%
+    # adverse move against a 9.5% liquidation threshold). Measured liquidation
+    # rate over 533 real volume-leg events: 3x 0.0% / 5x 0.2% / 10x 4.7% /
+    # 20x 17.8%. Prod moved to 5x on 2026-09-03.
     majorsbot_newsevent_position_size_pct: float = 1.0
     majorsbot_newsevent_risk_per_trade_pct: float = 0.0025
     majorsbot_newsevent_max_concurrent: int = 3
@@ -184,6 +191,17 @@ class Settings(BaseSettings):
     # cap, or LIQUIDATION. Sizing then comes purely from the notional cap,
     # since there is no stop distance to normalise risk against.
     majorsbot_newsevent_stop_enabled: bool = False
+    # True = the news leg only accepts PRIMARY sources (Binance/Upbit exchange
+    # announcements) and ignores media articles scored "high" by the keyword
+    # heuristic. Over 176 reconstructed signals the media population had a
+    # statistically significant NEGATIVE edge (n=151, mean −2.24% of equity per
+    # trade, t=−2.11) while primary announcements ran +15.53% (n=25, t=1.30,
+    # promising but not established). Media supplied 86% of all signals — the
+    # live book agrees: the five media-sourced trades averaged −8.9% of equity.
+    majorsbot_newsevent_primary_only: bool = True
+    # True = enter on a retrace limit instead of at market. See
+    # strategies.NEWSEVENT_RETRACE_DEPTH.
+    majorsbot_newsevent_retrace_entry: bool = True
     majorsbot_maker_fee_pct: float = 0.0002        # limit entries + limit partial TPs
     majorsbot_taker_fee_pct: float = 0.0006        # market entries + market-style exits
     majorsbot_slippage_pct: float = 0.0002         # adverse slip on market-style exits only

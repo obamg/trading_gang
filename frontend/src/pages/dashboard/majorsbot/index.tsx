@@ -21,6 +21,7 @@ import {
 const VERDICT_N: Record<MajorsBotStrategy, number> = {
   volevent: 30,
   fundingfade: 100,
+  newsevent: 30,
 };
 
 const STRATEGY_META: Record<
@@ -36,6 +37,11 @@ const STRATEGY_META: Record<
     label: "fundingfade",
     color: "#D946EF",
     blurb: "funding-extreme fade — market entries",
+  },
+  newsevent: {
+    label: "newsevent",
+    color: "#F59E0B",
+    blurb: "exchange announcement + volume — 5m retrace limits, stopless 5x",
   },
 };
 
@@ -116,14 +122,16 @@ export default function MajorsBotPage() {
         <Skeleton className="h-56" />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {(["volevent", "fundingfade"] as MajorsBotStrategy[]).map((s) => (
+          {(["volevent", "fundingfade", "newsevent"] as MajorsBotStrategy[]).map((s) => (
             <StrategyPanel
               key={s}
               strategy={s}
               enabled={
                 s === "volevent"
                   ? status.config.volevent_enabled
-                  : status.config.fundingfade_enabled
+                  : s === "fundingfade"
+                    ? status.config.fundingfade_enabled
+                    : status.config.newsevent_enabled
               }
               row={analytics.by_strategy.find((r) => r.label === s)}
               dirRows={analytics.by_strategy_direction.filter((r) =>
@@ -180,7 +188,17 @@ function StrategyPanel({
   const n = row?.n_trades ?? 0;
   const gate = VERDICT_N[strategy];
   const progress = Math.min(1, n / gate);
-  const avgRNet = row?.avg_r_net ?? null;
+  // newsevent runs stopless, so its R denominator is a reference stop that
+  // never executes — it ranged 5%–51% of equity across the first 11 trades and
+  // averaging it measures spike-bar height, not performance. That strategy is
+  // judged on % of equity; the backtested ones keep their pre-committed R gate.
+  const usePctEquity = strategy === "newsevent";
+  const headline = usePctEquity ? (row?.avg_pct_equity ?? null) : (row?.avg_r_net ?? null);
+  const headlineLabel = usePctEquity ? "avg % of equity / trade" : "avg net R / trade";
+  const headlineText =
+    headline === null
+      ? "—"
+      : `${headline >= 0 ? "+" : ""}${headline.toFixed(usePctEquity ? 2 : 3)}${usePctEquity ? "%" : "R"}`;
 
   return (
     <div className="rounded-lg border border-borderSubtle bg-bgCard p-4">
@@ -201,12 +219,12 @@ function StrategyPanel({
       <div className="mt-4 flex items-baseline gap-2">
         <span
           className={`text-2xl font-bold tabular-nums ${
-            avgRNet === null ? "text-textMuted" : avgRNet >= 0 ? "text-bullish" : "text-loss"
+            headline === null ? "text-textMuted" : headline >= 0 ? "text-bullish" : "text-loss"
           }`}
         >
-          {avgRNet === null ? "—" : `${avgRNet >= 0 ? "+" : ""}${avgRNet.toFixed(3)}R`}
+          {headlineText}
         </span>
-        <span className="text-xs text-textMuted">avg net R / trade</span>
+        <span className="text-xs text-textMuted">{headlineLabel}</span>
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm md:grid-cols-3">
@@ -222,21 +240,21 @@ function StrategyPanel({
           }
         />
         <StatCell
-          label="Σ Net R"
-          value={
-            <span
-              className={`tabular-nums ${
-                (row?.realized_r_net ?? 0) > 0
-                  ? "text-bullish"
-                  : (row?.realized_r_net ?? 0) < 0
-                    ? "text-loss"
-                    : ""
-              }`}
-            >
-              {(row?.realized_r_net ?? 0) >= 0 ? "+" : ""}
-              {(row?.realized_r_net ?? 0).toFixed(2)}
-            </span>
-          }
+          label={usePctEquity ? "Σ % equity" : "Σ Net R"}
+          value={(() => {
+            const sum = usePctEquity ? (row?.pct_equity ?? 0) : (row?.realized_r_net ?? 0);
+            return (
+              <span
+                className={`tabular-nums ${
+                  sum > 0 ? "text-bullish" : sum < 0 ? "text-loss" : ""
+                }`}
+              >
+                {sum >= 0 ? "+" : ""}
+                {sum.toFixed(2)}
+                {usePctEquity ? "%" : ""}
+              </span>
+            );
+          })()}
         />
         <StatCell
           label="P&L"

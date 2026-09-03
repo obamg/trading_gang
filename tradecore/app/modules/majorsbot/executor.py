@@ -55,9 +55,23 @@ async def place_pending_order(
     qty: Decimal,
     paper_equity: Decimal,
     expire_at: datetime,
+    initial_stop_price: Decimal | None = None,
+    entry_bar_at: datetime | None = None,
 ) -> MajorsBotTrade:
     """Insert a pending retrace-limit row. Stop/TP/qty here are the limit-price
-    estimates; all are recomputed at the actual fill (gap fills move them)."""
+    estimates; all are recomputed at the actual fill (gap fills move them).
+
+    ``initial_stop_price`` defaults to ``stop_price`` (volevent: one stop, both
+    the exit and the R unit). newsevent runs stopless, where ``stop_price`` is
+    the liquidation price but R must still be measured against the reference
+    stop — it passes the two separately.
+
+    ``entry_bar_at`` on a PENDING row means "the last bar already closed when
+    this order was placed"; fills may only occur on bars after it. Without it a
+    late-arriving news leg could fill against bars that had already printed —
+    lookahead the live bot could never have had. It is overwritten with the
+    actual fill bar on transition to open.
+    """
     now = datetime.now(timezone.utc)
     trade = MajorsBotTrade(
         symbol=symbol,
@@ -68,6 +82,7 @@ async def place_pending_order(
         signal_at=signal_at,
         entry_price=limit_price,
         entry_at=now,
+        entry_bar_at=entry_bar_at,
         entry_mode="limit",
         limit_price=limit_price,
         expire_at=expire_at,
@@ -77,7 +92,9 @@ async def place_pending_order(
         qty=qty,
         paper_equity_at_entry=paper_equity,
         stop_price=stop_price,
-        initial_stop_price=stop_price,
+        initial_stop_price=(
+            initial_stop_price if initial_stop_price is not None else stop_price
+        ),
         take_profit_price=take_profit_price,
         status="pending",
     )
@@ -123,17 +140,24 @@ async def fill_pending_order(
     qty: Decimal,
     entry_bar_at: datetime,
     paper_equity: Decimal,
+    initial_stop_price: Decimal | None = None,
+    alert_extra: dict | None = None,
 ) -> MajorsBotTrade:
     """pending → open. Entry/stop/TP/qty are recomputed at the fill price (gap
     fills land better than the limit; the 1% stop floor re-anchors on the
-    fill, exactly as the bake-off does)."""
+    fill, exactly as the bake-off does).
+
+    ``initial_stop_price`` defaults to ``stop_price`` — see place_pending_order.
+    """
     now = datetime.now(timezone.utc)
     trade.status = "open"
     trade.entry_price = fill_price
     trade.entry_at = now
     trade.entry_bar_at = entry_bar_at
     trade.stop_price = stop_price
-    trade.initial_stop_price = stop_price
+    trade.initial_stop_price = (
+        initial_stop_price if initial_stop_price is not None else stop_price
+    )
     trade.take_profit_price = take_profit_price
     trade.qty = qty
     trade.notional_usd = fill_price * qty
@@ -141,22 +165,24 @@ async def fill_pending_order(
     await db.commit()
 
     await equity.increment_concurrent(equity.ledger_for(trade.strategy))
-    await redis_service.publish_alert(
-        "majorsbot",
-        {
-            "type": "trade_opened",
-            "id": str(trade.id),
-            "symbol": trade.symbol,
-            "strategy": trade.strategy,
-            "direction": trade.direction,
-            "entry_mode": "limit",
-            "entry_price": float(fill_price),
-            "stop_price": float(stop_price),
-            "take_profit_price": float(take_profit_price),
-            "qty": float(qty),
-            "entry_at": now.isoformat(),
-        },
-    )
+    # Caller extras first, then core keys overwrite — a bad `alert_extra` can
+    # decorate the alert but never corrupt its identity.
+    payload = dict(alert_extra or {})
+    for k, v in {
+        "type": "trade_opened",
+        "id": str(trade.id),
+        "symbol": trade.symbol,
+        "strategy": trade.strategy,
+        "direction": trade.direction,
+        "entry_mode": "limit",
+        "entry_price": float(fill_price),
+        "stop_price": float(stop_price),
+        "take_profit_price": float(take_profit_price),
+        "qty": float(qty),
+        "entry_at": now.isoformat(),
+    }.items():
+        payload[k] = v
+    await redis_service.publish_alert("majorsbot", payload)
 
     # Observational regime/crowding stamp (CMCPulse). Best-effort by design:
     # the function swallows everything internally, and the guard here covers
