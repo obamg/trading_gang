@@ -218,7 +218,7 @@ class _Row:
 
 @pytest.mark.asyncio
 async def test_recent_news_legs_filters_and_fans_out(monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     ts = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
     rows = [
@@ -238,6 +238,9 @@ async def test_recent_news_legs_filters_and_fans_out(monkeypatch):
         async def execute(self, *a, **k):
             return _Result()
 
+    # This test covers the importance filter + coin fan-out, so it pins the
+    # source gate OFF. The gate itself has its own test below.
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_primary_only", False, raising=False)
     legs = await ne.recent_news_legs(_DB(), 900)
     assert set(legs) == {"BTCUSDT", "ETHUSDT", "HYPEUSDT"}
     assert legs["HYPEUSDT"]["primary"] is True
@@ -294,7 +297,8 @@ async def test_tick_is_noop_when_strategy_disabled(monkeypatch):
     monkeypatch.setattr(ne.app_settings, "majorsbot_enabled", True, raising=False)
     monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_enabled", False, raising=False)
     assert await ne.run_newsevent_tick() == {
-        "symbols": 0, "opened": 0, "closed": 0, "vol_legs": 0, "news_legs": 0
+        "symbols": 0, "opened": 0, "closed": 0, "vol_legs": 0, "news_legs": 0,
+        "placed": 0, "filled": 0, "cancelled": 0,
     }
 
 
@@ -406,7 +410,7 @@ def test_newsevent_does_not_use_global_concurrency_counter():
 
 # --- pre-mortem fixes (2026-08-20) ----------------------------------------
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 class _FakeTrade:
@@ -605,3 +609,225 @@ def test_engine_reconcile_excludes_newsevent():
     from app.modules.majorsbot import engine
 
     assert "NEWSEVENT" in inspect.getsource(engine._count_open)
+
+
+# --- 2026-09-03: primary-source gate + retrace entry ----------------------
+#
+# Both changes come from an event study over 176 signals reconstructed from
+# 120 days of history (vs the 11 live trades at the time). Media articles
+# scored "high" by the keyword heuristic carried a statistically significant
+# NEGATIVE edge (n=151, mean −2.24% of equity, t=−2.11) and supplied 86% of
+# all signals; market-at-spike-close bought the top tick of the impulse.
+
+
+@pytest.mark.asyncio
+async def test_primary_only_gate_drops_media_high(monkeypatch):
+    """The default config trades exchange announcements, not headlines."""
+    from datetime import datetime, timezone
+
+    ts = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    rows = [
+        _Row("BTC", "high", "CoinDesk", "bullish", ts),                # media
+        _Row("XRP", "high", "Decrypt", "bearish", ts),                 # media
+        _Row("ICX", "high", "Upbit Notices", "bearish", ts),           # primary
+        _Row("HYPE", "normal", "Binance Announcements", None, ts),     # primary
+    ]
+
+    class _Result:
+        def scalars(self):
+            class _S:
+                def all(self_inner):
+                    return rows
+            return _S()
+
+    class _DB:
+        async def execute(self, *a, **k):
+            return _Result()
+
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_primary_only", True, raising=False)
+    legs = await ne.recent_news_legs(_DB(), 900)
+    assert set(legs) == {"ICXUSDT", "HYPEUSDT"}
+    assert all(leg["primary"] for leg in legs.values())
+
+    # Flipping the flag restores the old (media-inclusive) behaviour.
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_primary_only", False, raising=False)
+    legs = await ne.recent_news_legs(_DB(), 900)
+    assert set(legs) == {"BTCUSDT", "XRPUSDT", "ICXUSDT", "HYPEUSDT"}
+
+
+def test_retrace_limit_sits_between_close_and_adverse_extreme():
+    # long spike bar: 100 → 110, low 98, closes near the high
+    limit = st.newsevent_limit_price(
+        "long", Decimal("110"), Decimal("110"), Decimal("98")
+    )
+    assert limit == Decimal("104")            # 110 − 0.5 × (110 − 98)
+    assert Decimal("98") < limit < Decimal("110")
+
+
+def test_retrace_limit_short_is_above_close():
+    limit = st.newsevent_limit_price(
+        "short", Decimal("90"), Decimal("102"), Decimal("90")
+    )
+    assert limit == Decimal("96")             # 90 + 0.5 × (102 − 90)
+    assert Decimal("90") < limit < Decimal("102")
+
+
+def test_retrace_limit_is_always_on_the_adverse_side_of_the_close():
+    """volevent uses (h+l)/2; newsevent anchors on the CLOSE. On a rejection
+    bar the midpoint lands on the WRONG side of the close — already marketable,
+    so it fills instantly with no retrace discipline. The close-anchored level
+    never does."""
+    high, low, close = Decimal("110"), Decimal("98"), Decimal("100")
+    midpoint = (high + low) / 2
+    assert midpoint > close                   # the flaw: a long "limit" above price
+    limit = st.newsevent_limit_price("long", close, high, low)
+    assert limit < close                      # a real retrace, always
+    assert limit != midpoint
+
+    # Short side, mirrored.
+    high, low, close = Decimal("102"), Decimal("90"), Decimal("100")
+    midpoint = (high + low) / 2
+    assert midpoint < close
+    assert st.newsevent_limit_price("short", close, high, low) > close
+
+
+def test_retrace_limit_rejects_degenerate_bar():
+    # close == low on a long: no room to retrace into
+    assert st.newsevent_limit_price(
+        "long", Decimal("100"), Decimal("105"), Decimal("100")
+    ) is None
+    assert st.newsevent_limit_price(
+        "short", Decimal("100"), Decimal("100"), Decimal("95")
+    ) is None
+    assert st.newsevent_limit_price("sideways", Decimal("100"), Decimal("101"), Decimal("99")) is None
+
+
+def test_volevent_retrace_mechanics_untouched():
+    """Isolation guard: newsevent's new entry constants must not have moved
+    volevent's, which mirror the 12-month bake-off."""
+    assert st.VOLEVENT_RETRACE_DEPTH == 0.5
+    assert st.VOLEVENT_FILL_WINDOW_HOURS == 6
+    assert st.NEWSEVENT_RETRACE_DEPTH == Decimal("0.5")
+    assert st.NEWSEVENT_FILL_WINDOW_MIN == 60
+
+
+@pytest.mark.asyncio
+async def test_pending_does_not_fill_on_bars_that_predate_placement(monkeypatch, fake_redis):
+    """Anti-lookahead: the news leg can land minutes after the spike bar. Bars
+    already closed at placement must never fill the order, or paper credits
+    itself a move the live bot could not have caught."""
+    monkeypatch.setattr(ne.redis_service, "get_redis", lambda: fake_redis)
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_stop_enabled", False, raising=False)
+    monkeypatch.setattr("app.modules.majorsbot.engine.symbol_list", lambda: ["BTCUSDT"])
+
+    filled, cancelled = [], []
+
+    async def fake_fill(db, trade, **kw):
+        filled.append(kw)
+
+    async def fake_cancel(db, trade, **kw):
+        cancelled.append(kw)
+
+    monkeypatch.setattr(ne.executor, "fill_pending_order", fake_fill)
+    monkeypatch.setattr(ne.executor, "cancel_pending_order", fake_cancel)
+
+    placed_at = datetime.fromtimestamp((BASE + 3 * st.NEWSEVENT_BAR_MS) / 1000, tz=timezone.utc)
+    trade = _FakeTrade(
+        status="pending", entry_mode="limit", limit_price=99.0,
+        signal_high=101.0, signal_low=98.0,
+        entry_bar_at=placed_at,
+        # Wall-clock future: BASE is a historical fixture timestamp, so a
+        # BASE-relative expiry would already be past and cancel on the spot.
+        expire_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    # bars 1-2 touch the limit but PRE-DATE placement; bars 4-5 do not touch.
+    bars = [
+        _bar(1, 100.0, 100.5, 98.5, 99.5),
+        _bar(2, 99.5, 100.0, 98.2, 99.8),
+        _bar(3, 99.8, 100.2, 99.6, 100.0),
+        _bar(4, 100.0, 101.0, 99.9, 100.5),
+        _bar(5, 100.5, 101.5, 100.2, 101.0),
+    ]
+    out = await ne._manage_pending(_WalkDB(), trade, _md(bars))
+    assert out == "waiting"
+    assert filled == [] and cancelled == []
+
+
+@pytest.mark.asyncio
+async def test_pending_fills_on_a_later_touch(monkeypatch, fake_redis):
+    monkeypatch.setattr(ne.redis_service, "get_redis", lambda: fake_redis)
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_stop_enabled", False, raising=False)
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_max_concurrent", 1, raising=False)
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_position_size_pct", 10.0, raising=False)
+    monkeypatch.setattr("app.modules.majorsbot.engine.symbol_list", lambda: ["BTCUSDT"])
+
+    async def fake_equity(ledger=None):
+        return Decimal("10000")
+
+    async def no_open(db, statuses=("pending", "open")):
+        return 0
+
+    filled = []
+
+    async def fake_fill(db, trade, **kw):
+        filled.append(kw)
+
+    monkeypatch.setattr(ne.equity, "get_paper_equity", fake_equity)
+    monkeypatch.setattr(ne, "count_open", no_open)
+    monkeypatch.setattr(ne.executor, "fill_pending_order", fake_fill)
+
+    trade = _FakeTrade(
+        status="pending", entry_mode="limit", limit_price=99.0,
+        signal_high=101.0, signal_low=98.0,
+        entry_bar_at=datetime.fromtimestamp(BASE / 1000, tz=timezone.utc),
+        expire_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    bars = [_bar(1, 100.0, 100.2, 99.8, 100.0), _bar(2, 100.0, 100.1, 98.5, 99.2)]
+    out = await ne._manage_pending(_WalkDB(), trade, _md(bars))
+    assert out == "filled"
+    assert len(filled) == 1
+    # R denominator and the death level are separate for a stopless entry.
+    assert filled[0]["initial_stop_price"] != filled[0]["stop_price"]
+
+
+@pytest.mark.asyncio
+async def test_pending_cancels_at_expiry(monkeypatch, fake_redis):
+    monkeypatch.setattr(ne.redis_service, "get_redis", lambda: fake_redis)
+    cancelled = []
+
+    async def fake_cancel(db, trade, **kw):
+        cancelled.append(kw.get("reason", st.CLOSE_EXPIRED))
+
+    monkeypatch.setattr(ne.executor, "cancel_pending_order", fake_cancel)
+    trade = _FakeTrade(
+        status="pending", entry_mode="limit", limit_price=90.0,
+        signal_high=101.0, signal_low=98.0,
+        entry_bar_at=datetime.fromtimestamp(BASE / 1000, tz=timezone.utc),
+        expire_at=datetime(2000, 1, 1, tzinfo=timezone.utc),   # long past
+    )
+    out = await ne._manage_pending(_WalkDB(), trade, _md([_bar(1, 100.0, 100.2, 99.8, 100.0)]))
+    assert out == "cancelled" and len(cancelled) == 1
+
+
+@pytest.mark.asyncio
+async def test_walker_persists_peak_price(_walker_env):
+    """MFE must survive on the row: without it the DB cannot answer 'did this
+    loser ever go green?' and every exit question needs bars refetched."""
+    trade = _FakeTrade()
+    db = _WalkDB()
+    await ne._walk_open(db, trade, _md([BAR1, BAR2, BAR3]))
+    assert trade.peak_price is not None
+    assert float(trade.peak_price) == pytest.approx(104.5)   # BAR2 high
+
+
+@pytest.mark.asyncio
+async def test_peak_price_recorded_even_on_liquidation(monkeypatch, _walker_env):
+    """`mfe` updates at the top of the loop, so the bar that kills the trade
+    still contributes — unlike `peak`, which drives the trail ratchet and must
+    only bind on later bars."""
+    monkeypatch.setattr(ne.app_settings, "majorsbot_newsevent_position_size_pct", 10.0, raising=False)
+    trade = _FakeTrade(qty=1000.0)          # 100k notional on 10k → 10x
+    up_then_dead = _bar(1, 100.0, 103.0, 89.0, 89.5)
+    await ne._walk_open(_WalkDB(), trade, _md([up_then_dead]))
+    assert _walker_env["close"][0]["reason"] == st.CLOSE_LIQUIDATION
+    assert float(trade.peak_price) == pytest.approx(103.0)

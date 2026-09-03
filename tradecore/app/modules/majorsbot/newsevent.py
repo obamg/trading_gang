@@ -59,6 +59,10 @@ NEWS_LEG_KEY = "majorsbot:newsevent:news:{symbol}"
 # bar is still the latest completed bar.
 COOLDOWN_KEY = "majorsbot:newsevent:cooldown:{symbol}"
 COOLDOWN_S = 3600
+# Which headline caused a resting limit. The pending row has no column for it,
+# and the entry alert fires at FILL — up to an hour later — so it is stashed
+# here and read back then. Losing it costs alert detail, never a trade.
+NEWS_CTX_KEY = "majorsbot:newsevent:ctx:{trade_id}"
 
 QUOTE = "USDT"
 ACTIVE_SYMBOLS_KEY = "symbols:active"
@@ -103,10 +107,13 @@ async def recent_news_legs(db, window_s: int) -> dict[str, dict]:
         )
     ).scalars().all()
 
+    primary_only = bool(
+        getattr(app_settings, "majorsbot_newsevent_primary_only", True)
+    )
     legs: dict[str, dict] = {}
     for row in rows:
         is_primary = row.source_name in PRIMARY_SOURCES
-        if not is_primary and row.importance != "high":
+        if not is_primary and (primary_only or row.importance != "high"):
             continue
         for coin in (row.coins or "").split(","):
             coin = coin.strip()
@@ -168,6 +175,20 @@ async def load_leg(key: str, symbol: str) -> dict | None:
         return None
 
 
+async def _load_news_ctx(trade_id: str) -> dict | None:
+    """Headline context stashed at placement. Best-effort: an expired or
+    unparseable stash just means a less detailed entry alert."""
+    try:
+        r = redis_service.get_redis()
+        raw = await r.get(NEWS_CTX_KEY.format(trade_id=trade_id))
+        if raw is None:
+            return None
+        return json.loads(_decode(raw))
+    except Exception as e:
+        log.warning("newsevent_ctx_read_failed", trade_id=trade_id, err=str(e))
+        return None
+
+
 async def clear_legs(symbol: str) -> None:
     r = redis_service.get_redis()
     await r.delete(VOL_LEG_KEY.format(symbol=symbol))
@@ -188,18 +209,22 @@ async def _has_live_trade(db, symbol: str) -> bool:
     return bool(rows)
 
 
-async def count_open(db) -> int:
-    """Open newsevent positions only.
+async def count_open(db, statuses: tuple[str, ...] = ("pending", "open")) -> int:
+    """Live newsevent rows only.
 
     Deliberately NOT equity.get_concurrent_count(), which is a bot-wide
     counter: with a per-strategy cap of 1, volevent's open positions would
     permanently block newsevent from ever entering.
+
+    Default counts pendings so a resting limit blocks a second placement; the
+    fill transition re-checks with ``statuses=("open",)`` since a pending holds
+    no slot of its own.
     """
     rows = (
         await db.execute(
             select(MajorsBotTrade)
             .where(MajorsBotTrade.strategy == strategies.NEWSEVENT)
-            .where(MajorsBotTrade.status.in_(("pending", "open")))
+            .where(MajorsBotTrade.status.in_(statuses))
         )
     ).scalars().all()
     return len(rows)
@@ -215,8 +240,187 @@ def _mmr_for(symbol: str) -> Decimal:
     return strategies.NEWSEVENT_MMR_NON_MAJOR
 
 
+def _size_and_levels(symbol: str, direction: str, entry: Decimal, extreme: Decimal, eq: Decimal):
+    """(qty, ref_stop, exit_stop, leverage, liq) for an entry at `entry`.
+
+    Shared by the market path and the pending-limit fill so both size the same
+    way. `ref_stop` is always the R denominator; `exit_stop` is where the
+    position actually dies — the liquidation price when stops are disabled.
+    """
+    ref_stop, _ref_risk = strategies.newsevent_stop(direction, entry, extreme)
+    cap_pct = _dec(app_settings.majorsbot_newsevent_position_size_pct)
+    stop_enabled = bool(getattr(app_settings, "majorsbot_newsevent_stop_enabled", True))
+
+    if stop_enabled:
+        qty = strategies.compute_qty(
+            paper_equity=eq,
+            risk_per_trade_pct=_dec(app_settings.majorsbot_newsevent_risk_per_trade_pct),
+            entry_price=entry,
+            stop_price=ref_stop,
+            max_notional_pct=cap_pct,
+        )
+    else:
+        # No stop distance to normalise against, so the notional cap IS the
+        # size: qty = equity x leverage / entry.
+        qty = (eq * cap_pct / entry) if entry > 0 else Decimal("0")
+    if qty <= 0:
+        return None
+
+    leverage = strategies.effective_leverage(entry * qty, eq)
+    liq = strategies.liquidation_price(direction, entry, leverage, _mmr_for(symbol))
+    # stop_price always means "where this position dies". With the protective
+    # stop off that is the liquidation price; if leverage is low enough that
+    # liquidation is unreachable, fall back to the reference stop so the
+    # NOT NULL column still carries a meaningful number.
+    exit_stop = ref_stop if stop_enabled else (liq if liq is not None else ref_stop)
+    return qty, ref_stop, exit_stop, leverage, liq
+
+
+async def _place_retrace_limit(
+    db, symbol: str, vol_leg: dict, news_leg: dict, md: data.MarketData,
+    *, direction: str, eq: Decimal, lag_s: float, leg_order: str,
+) -> bool:
+    """Park a limit half-way back into the spike bar instead of chasing it."""
+    spike_high = _dec(vol_leg["bar_high"])
+    spike_low = _dec(vol_leg["bar_low"])
+    limit = strategies.newsevent_limit_price(
+        direction, _dec(vol_leg["close"]), spike_high, spike_low
+    )
+    if limit is None:
+        log.info("newsevent_degenerate_spike_bar", symbol=symbol, direction=direction)
+        await clear_legs(symbol)
+        return False
+
+    extreme = spike_low if direction == "long" else spike_high
+    sized = _size_and_levels(symbol, direction, limit, extreme, eq)
+    if sized is None:
+        return False
+    qty, ref_stop, exit_stop, leverage, liq = sized
+    tp = strategies.take_profit_price(
+        direction, limit, abs(limit - ref_stop), strategies.NEWSEVENT_TP_R
+    )
+
+    last_bar = md.bars[-1]
+    trade = await executor.place_pending_order(
+        db,
+        symbol=symbol,
+        direction=direction,
+        strategy=strategies.NEWSEVENT,
+        signal_at=_dt(int(vol_leg["bar_ts"])),
+        signal_high=spike_high,
+        signal_low=spike_low,
+        limit_price=limit,
+        stop_price=exit_stop,
+        initial_stop_price=ref_stop,
+        take_profit_price=tp,
+        qty=qty,
+        paper_equity=eq,
+        # Bars already closed at placement are NOT fillable — see the
+        # executor docstring. The news leg can arrive minutes after the spike.
+        entry_bar_at=_dt(int(last_bar["t"])),
+        expire_at=datetime.now(timezone.utc)
+        + timedelta(minutes=strategies.NEWSEVENT_FILL_WINDOW_MIN),
+    )
+
+    r = redis_service.get_redis()
+    await r.set(
+        NEWS_CTX_KEY.format(trade_id=str(trade.id)),
+        json.dumps({
+            "news_source": news_leg.get("source"),
+            "news_title": news_leg.get("title"),
+            "leg_order": leg_order,
+            "leg_gap_s": lag_s,
+        }),
+        ex=strategies.NEWSEVENT_FILL_WINDOW_MIN * 60 + 600,
+    )
+    await r.set(COOLDOWN_KEY.format(symbol=symbol), "1", ex=COOLDOWN_S)
+    await clear_legs(symbol)
+    log.info(
+        "newsevent_limit_placed",
+        id=str(trade.id), symbol=symbol, direction=direction,
+        limit=float(limit), spike_close=float(_dec(vol_leg["close"])),
+        retrace_pct=float((abs(_dec(vol_leg["close"]) - limit) / _dec(vol_leg["close"])) * 100),
+        leverage=float(leverage), news_source=news_leg.get("source"),
+        leg_order=leg_order, leg_gap_s=lag_s, vol_mult=vol_leg.get("vol_mult"),
+    )
+    return True
+
+
+async def _manage_pending(db, trade: MajorsBotTrade, md: data.MarketData) -> str:
+    """One pending newsevent limit → waiting | cancelled | filled.
+
+    Replay-safe like _walk_open: eligibility is re-derived every tick from the
+    persisted row (fills only on bars strictly after ``entry_bar_at`` and
+    strictly before ``expire_at``), so there is no watermark to lose.
+    """
+    now = datetime.now(timezone.utc)
+    direction = trade.direction
+    limit = _dec(trade.limit_price)
+    placed_ms = int(trade.entry_bar_at.timestamp() * 1000) if trade.entry_bar_at else 0
+    expire_ms = int(trade.expire_at.timestamp() * 1000) if trade.expire_at else None
+
+    for bar in md.bars:
+        t = int(bar["t"])
+        if t <= placed_ms:
+            continue
+        if expire_ms is not None and t >= expire_ms:
+            break  # a bar opening at/after expiry can't fill — the order is gone
+        high, low, bar_open = _dec(bar["h"]), _dec(bar["l"]), _dec(bar["o"])
+        if not strategies.is_limit_touched(direction, high, low, limit):
+            continue
+
+        # Capacity gate at the fill transition — pendings never hold a slot.
+        if await count_open(db, statuses=("open",)) >= int(
+            app_settings.majorsbot_newsevent_max_concurrent
+        ):
+            await executor.cancel_pending_order(
+                db, trade, reason=strategies.CLOSE_MAX_CONCURRENT
+            )
+            return "cancelled"
+
+        fill_px = strategies.limit_fill_price(direction, bar_open, limit)
+        eq = await equity.get_paper_equity(equity.ledger_for(strategies.NEWSEVENT))
+        extreme = _dec(trade.signal_low if direction == "long" else trade.signal_high)
+        sized = _size_and_levels(trade.symbol, direction, fill_px, extreme, eq)
+        if sized is None:
+            await executor.cancel_pending_order(db, trade, reason="degenerate")
+            return "cancelled"
+        qty, ref_stop, exit_stop, leverage, liq = sized
+        stop_enabled = bool(getattr(app_settings, "majorsbot_newsevent_stop_enabled", True))
+        extra = {
+            "leverage": float(leverage),
+            "stop_kind": (
+                "liquidation" if (not stop_enabled and liq is not None) else "stop"
+            ),
+            "retrace_fill": True,
+        }
+        ctx = await _load_news_ctx(str(trade.id))
+        if ctx:
+            extra.update(ctx)
+        await executor.fill_pending_order(
+            db, trade,
+            fill_price=fill_px,
+            stop_price=exit_stop,
+            initial_stop_price=ref_stop,
+            take_profit_price=strategies.take_profit_price(
+                direction, fill_px, abs(fill_px - ref_stop), strategies.NEWSEVENT_TP_R
+            ),
+            qty=qty,
+            entry_bar_at=_dt(t),
+            paper_equity=eq,
+            alert_extra=extra,
+        )
+        return "filled"
+
+    if trade.expire_at is not None and now >= trade.expire_at:
+        await executor.cancel_pending_order(db, trade)
+        return "cancelled"
+    return "waiting"
+
+
 async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict, md: data.MarketData) -> bool:
-    """Both legs present — validate the pair and open at market."""
+    """Both legs present — validate the pair, then place a retrace limit (or
+    open at market when ``majorsbot_newsevent_retrace_entry`` is off)."""
     if not strategies.legs_paired(
         int(vol_leg["ts_ms"]), int(news_leg["ts_ms"]), strategies.NEWSEVENT_PAIR_WINDOW_S
     ):
@@ -253,44 +457,26 @@ async def _try_enter(db, symbol: str, vol_leg: dict, news_leg: dict, md: data.Ma
     # the live version could never have.
     last_bar = md.bars[-1]
     entry_raw = _dec(last_bar["c"])
+    extreme = _dec(vol_leg["bar_low"] if direction == "long" else vol_leg["bar_high"])
+    eq = await equity.get_paper_equity(equity.ledger_for(strategies.NEWSEVENT))
+    stop_enabled = bool(getattr(app_settings, "majorsbot_newsevent_stop_enabled", True))
+    lag_s = abs(int(vol_leg["ts_ms"]) - int(news_leg["ts_ms"])) / 1000
+    leg_order = "news_first" if news_leg["ts_ms"] <= vol_leg["ts_ms"] else "volume_first"
+
+    if bool(getattr(app_settings, "majorsbot_newsevent_retrace_entry", True)):
+        return await _place_retrace_limit(
+            db, symbol, vol_leg, news_leg, md,
+            direction=direction, eq=eq, lag_s=lag_s, leg_order=leg_order,
+        )
+
     entry = strategies.adverse_slippage_price(
         direction, entry_raw, _dec(app_settings.majorsbot_slippage_pct)
     )
-    extreme = _dec(vol_leg["bar_low"] if direction == "long" else vol_leg["bar_high"])
-    # Always computed: with stops on it is the exit, with stops off it is
-    # still the risk unit R is measured in.
-    ref_stop, _ref_risk = strategies.newsevent_stop(direction, entry, extreme)
-
-    eq = await equity.get_paper_equity(equity.ledger_for(strategies.NEWSEVENT))
-    cap_pct = _dec(app_settings.majorsbot_newsevent_position_size_pct)
-    stop_enabled = bool(getattr(app_settings, "majorsbot_newsevent_stop_enabled", True))
-
-    if stop_enabled:
-        qty = strategies.compute_qty(
-            paper_equity=eq,
-            risk_per_trade_pct=_dec(
-                app_settings.majorsbot_newsevent_risk_per_trade_pct
-            ),
-            entry_price=entry,
-            stop_price=ref_stop,
-            max_notional_pct=cap_pct,
-        )
-    else:
-        # No stop distance to normalise against, so the notional cap IS the
-        # size: qty = equity x leverage / entry.
-        qty = (eq * cap_pct / entry) if entry > 0 else Decimal("0")
-    if qty <= 0:
+    sized = _size_and_levels(symbol, direction, entry, extreme, eq)
+    if sized is None:
         return False
+    qty, ref_stop, exit_stop, leverage, liq = sized
 
-    leverage = strategies.effective_leverage(entry * qty, eq)
-    liq = strategies.liquidation_price(direction, entry, leverage, _mmr_for(symbol))
-    # stop_price always means "where this position dies". With the protective
-    # stop off that is the liquidation price; if leverage is low enough that
-    # liquidation is unreachable, fall back to the reference stop so the
-    # NOT NULL column still carries a meaningful number.
-    exit_stop = ref_stop if stop_enabled else (liq if liq is not None else ref_stop)
-
-    lag_s = abs(int(vol_leg["ts_ms"]) - int(news_leg["ts_ms"])) / 1000
     trade = await executor.open_market_trade(
         db,
         symbol=symbol,
@@ -401,6 +587,13 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
     at the open); liquidation books the BANKRUPTCY price — the exchange
     engine's outcome, not the liq trigger. Funding accrues on every close.
     """
+    # Strictly after the entry bar. For a market entry that is exact (entry IS
+    # that bar's close). For a retrace-limit fill it is mildly optimistic: the
+    # remainder of the fill bar is never evaluated, so a liquidation contained
+    # entirely within it would be missed. Not corrected here because the bar's
+    # extremes may predate the fill, and assuming they didn't would be
+    # pessimistic in the opposite direction — 5m OHLC cannot distinguish the
+    # two. The following bar is checked normally one tick later.
     entry_bar = int(trade.entry_bar_at.timestamp() * 1000) if trade.entry_bar_at else 0
     bars = [b for b in md.bars if int(b["t"]) > entry_bar]
     if not bars:
@@ -434,10 +627,19 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
     stop: Decimal | None = initial_stop if stop_enabled else None
     trail_armed = False
     peak = entry
+    # Recording-only max-favourable-excursion. Deliberately NOT `peak`: that
+    # one drives the trail ratchet and is updated at the BOTTOM of the loop so
+    # a ratchet can only bind on later bars. `mfe` updates at the top so the
+    # persisted value includes the bar a liquidation or stop happened on.
+    mfe = entry
     held = 0
 
     async def _close(raw_exit: Decimal, reason: str, bar_ms: int) -> None:
         funding_pnl = await _accrued_funding(trade, md, exit_bar_ms=bar_ms)
+        # Persist MFE before the close writes the row — without it the DB
+        # cannot answer "did this loser ever go green?" after the fact, and
+        # every exit-rule question needs the bars refetched from the exchange.
+        trade.peak_price = mfe
         await executor.close_trade(
             db, trade, raw_exit_price=raw_exit, reason=reason, funding_pnl=funding_pnl
         )
@@ -446,6 +648,7 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
         held += 1
         bar_ms = int(bar["t"])
         bar_open, high, low = _dec(bar["o"]), _dec(bar["h"]), _dec(bar["l"])
+        mfe = max(mfe, high) if direction == "long" else min(mfe, low)
 
         if liq is not None:
             hit_liq = low <= liq if direction == "long" else high >= liq
@@ -507,6 +710,7 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
     # Display state only — the next replay re-derives everything above.
     if trail_armed and stop is not None and _dec(trade.stop_price) != stop:
         trade.stop_price = stop
+    trade.peak_price = mfe
     await db.commit()
     return False
 
@@ -515,7 +719,10 @@ async def _walk_open(db, trade: MajorsBotTrade, md: data.MarketData) -> bool:
 
 async def run_newsevent_tick() -> dict:
     """One pass: manage open positions, refresh both legs, fire any pairs."""
-    totals = {"symbols": 0, "opened": 0, "closed": 0, "vol_legs": 0, "news_legs": 0}
+    totals = {
+        "symbols": 0, "opened": 0, "closed": 0, "vol_legs": 0, "news_legs": 0,
+        "placed": 0, "filled": 0, "cancelled": 0,
+    }
     if not getattr(app_settings, "majorsbot_enabled", False):
         return totals
     if not getattr(app_settings, "majorsbot_newsevent_enabled", False):
@@ -527,21 +734,23 @@ async def run_newsevent_tick() -> dict:
         news_legs = await recent_news_legs(db, window_s)
         totals["news_legs"] = len(news_legs)
 
-        open_rows = (
+        live_rows = (
             await db.execute(
                 select(MajorsBotTrade)
                 .where(MajorsBotTrade.strategy == strategies.NEWSEVENT)
-                .where(MajorsBotTrade.status == "open")
+                .where(MajorsBotTrade.status.in_(("pending", "open")))
             )
         ).scalars().all()
 
         universe = await tradeable_universe(set(news_legs))
-        # An open position must be walked even if its symbol left the universe.
-        for row in open_rows:
+        # A live row must be driven even if its symbol left the universe —
+        # otherwise a resting limit would never fill or expire.
+        for row in live_rows:
             if row.symbol not in universe:
                 universe.append(row.symbol)
 
-        open_by_symbol = {row.symbol: row for row in open_rows}
+        open_by_symbol = {r.symbol: r for r in live_rows if r.status == "open"}
+        pending_by_symbol = {r.symbol: r for r in live_rows if r.status == "pending"}
 
         for symbol in universe:
             totals["symbols"] += 1
@@ -554,6 +763,20 @@ async def run_newsevent_tick() -> dict:
                 if trade is not None:
                     if await _walk_open(db, trade, md):
                         totals["closed"] += 1
+                    continue
+
+                pending = pending_by_symbol.get(symbol)
+                if pending is not None:
+                    outcome = await _manage_pending(db, pending, md)
+                    if outcome == "cancelled":
+                        totals["cancelled"] += 1
+                    elif outcome == "filled":
+                        totals["filled"] += 1
+                        # Walk the just-filled position in the same tick so a
+                        # liquidation or trail inside the fill window is not
+                        # deferred a full minute.
+                        if await _walk_open(db, pending, md):
+                            totals["closed"] += 1
                     continue
 
                 # --- leg V: volume spike on the latest completed 5m bar
@@ -574,11 +797,15 @@ async def run_newsevent_tick() -> dict:
 
                 if vol_leg is not None and news_leg is not None:
                     if await _try_enter(db, symbol, vol_leg, news_leg, md):
-                        totals["opened"] += 1
+                        # retrace mode parks a limit; market mode opens now
+                        if bool(getattr(app_settings, "majorsbot_newsevent_retrace_entry", True)):
+                            totals["placed"] += 1
+                        else:
+                            totals["opened"] += 1
             except Exception as e:
                 log.warning("newsevent_symbol_failed", symbol=symbol, err=str(e))
 
-    if totals["opened"] or totals["closed"] or totals["vol_legs"]:
+    if totals["opened"] or totals["closed"] or totals["vol_legs"] or totals["placed"] or totals["filled"]:
         log.info("newsevent_tick", **totals)
     return totals
 

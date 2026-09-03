@@ -75,6 +75,28 @@ NEWSEVENT_TRAIL_ARM_R = Decimal("1.0")
 NEWSEVENT_TRAIL_DIST_R = Decimal("1.0")
 NEWSEVENT_MAX_HOLD_BARS = 72          # 6h of 5m bars — news edge decays fast
 NEWSEVENT_MIN_TRADES = 30             # pre-committed evaluation gate
+
+# Retrace entry (2026-09-03). Market-at-spike-close buys the top tick of the
+# impulse: over 176 signals reconstructed from 120 days of history, the median
+# forward return from a market fill was NEGATIVE at every horizon (5m −0.038%,
+# 1h −0.050%, 6h −0.067%) with a sub-50% hit rate, while the median adverse
+# excursion in the first 30 minutes was −0.29% — the retrace we were paying for
+# every time. A limit half-way back from the spike close to the bar's adverse
+# extreme lifted per-signal expectancy from +0.29% to +1.82% of equity (10x,
+# net of fees) at a 73% fill rate.
+#
+# Anchored on the CLOSE, not the bar midpoint. volevent's (h+l)/2 measured
+# materially worse here (+0.18% vs +1.82%), and it has a structural flaw for
+# this signal: when a bar closes well off its extreme — a rejection, common on
+# news — the midpoint lands on the WRONG side of the close (long bar 98/110
+# closing at 100 has a midpoint of 104), so the "limit" is already marketable
+# and fills instantly with no retrace discipline at all. A close-anchored level
+# is always strictly on the adverse side of the close.
+#
+# Not significant on its own (t≈1.15) — the mechanism is the justification, the
+# magnitude is not established. See NEWSEVENT_MIN_TRADES.
+NEWSEVENT_RETRACE_DEPTH = Decimal("0.5")
+NEWSEVENT_FILL_WINDOW_MIN = 60        # cancel unfilled after 1h
 # Bybit linear-perp maintenance margin. Only used when the protective stop is
 # disabled, where liquidation becomes the real exit. 0.5% is tier-1 for
 # majors; small caps run 1%+ tier-1 and a large notional may sit in tier 2-3,
@@ -195,6 +217,36 @@ def newsevent_direction(price_direction: str, news_sentiment: str | None) -> str
         return price_direction
     wanted = "long" if news_sentiment == "bullish" else "short"
     return price_direction if wanted == price_direction else None
+
+
+def newsevent_limit_price(
+    direction: str,
+    spike_close: Decimal,
+    spike_high: Decimal,
+    spike_low: Decimal,
+    depth: Decimal = NEWSEVENT_RETRACE_DEPTH,
+) -> Decimal | None:
+    """Retrace limit: `depth` of the way back from the spike close toward the
+    bar's adverse extreme. None if the bar is degenerate (no room to retrace).
+
+    Long  -> close − depth × (close − low)
+    Short -> close + depth × (high − close)
+
+    Deliberately NOT volevent's (h+l)/2 midpoint — see NEWSEVENT_RETRACE_DEPTH.
+    """
+    if spike_close <= 0:
+        return None
+    if direction == "long":
+        room = spike_close - spike_low
+        limit = spike_close - depth * room
+    elif direction == "short":
+        room = spike_high - spike_close
+        limit = spike_close + depth * room
+    else:
+        return None
+    if room <= 0 or limit <= 0:
+        return None
+    return limit
 
 
 def newsevent_stop(

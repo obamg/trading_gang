@@ -48,6 +48,15 @@ async def status(_user: CurrentUser, db: DBSession):
             "symbols": engine.symbol_list(),
             "volevent_enabled": bool(app_settings.majorsbot_volevent_enabled),
             "fundingfade_enabled": bool(app_settings.majorsbot_fundingfade_enabled),
+            "newsevent_enabled": bool(
+                getattr(app_settings, "majorsbot_newsevent_enabled", False)
+            ),
+            "newsevent_primary_only": bool(
+                getattr(app_settings, "majorsbot_newsevent_primary_only", True)
+            ),
+            "newsevent_retrace_entry": bool(
+                getattr(app_settings, "majorsbot_newsevent_retrace_entry", True)
+            ),
             "paper_equity_initial": float(app_settings.majorsbot_paper_equity_initial),
             "risk_per_trade_pct": float(app_settings.majorsbot_risk_per_trade_pct),
             "position_size_pct": float(app_settings.majorsbot_position_size_pct),
@@ -87,11 +96,31 @@ async def trades(
 async def analytics(
     _user: CurrentUser, db: DBSession, days: int = Query(default=90, ge=1, le=365)
 ):
-    """Per-strategy stats over closed trades in the window — the numbers the
-    forward test is judged on (avg realized_r_net first)."""
+    """Per-strategy stats over closed trades in the window.
+
+    Two expectancy metrics, deliberately:
+
+    - ``avg_r_net`` — the pre-committed gate metric for volevent/fundingfade,
+      whose R denominator is a real stop that really executes.
+    - ``avg_pct_equity`` — realized P&L over the equity at entry. This is the
+      honest metric for a STOPLESS strategy: newsevent sizes purely off the
+      notional cap and never touches its reference stop, so 1R there is a
+      phantom unit that ranged 5.0%–51.1% of equity across the first 11 trades.
+      Two trades doing near-identical damage (−57.6% and −48.3% of the book)
+      booked −1.13R and −9.12R. Averaging those measures spike-bar height, not
+      performance. Judge newsevent on avg_pct_equity.
+    """
     since = datetime.now(timezone.utc) - timedelta(days=days)
     base = and_(MajorsBotTrade.status == "closed", MajorsBotTrade.closed_at >= since)
 
+    pct_eq_expr = func.coalesce(
+        func.sum(
+            MajorsBotTrade.realized_pnl_usd
+            / func.nullif(MajorsBotTrade.paper_equity_at_entry, 0)
+            * 100
+        ),
+        0,
+    )
     n_expr = func.count()
     wins_expr = func.sum(case((MajorsBotTrade.realized_pnl_usd > 0, 1), else_=0))
     pnl_expr = func.coalesce(func.sum(MajorsBotTrade.realized_pnl_usd), 0)
@@ -100,7 +129,7 @@ async def analytics(
     fees_expr = func.coalesce(func.sum(MajorsBotTrade.fees_usd), 0)
     funding_expr = func.coalesce(func.sum(MajorsBotTrade.funding_pnl_usd), 0)
 
-    def _row(label, n, wins, pnl, r_sum, r_net_sum, fees, funding):
+    def _row(label, n, wins, pnl, r_sum, r_net_sum, fees, funding, pct_eq_sum):
         n_i = int(n or 0)
         wins_i = int(wins or 0)
         return {
@@ -113,11 +142,16 @@ async def analytics(
             "realized_r_net": float(r_net_sum or 0),
             "avg_r_net": (float(r_net_sum or 0) / n_i) if n_i else None,
             "expectancy_r_net": (float(r_net_sum or 0) / n_i) if n_i else None,
+            "pct_equity": float(pct_eq_sum or 0),
+            "avg_pct_equity": (float(pct_eq_sum or 0) / n_i) if n_i else None,
             "fees_usd": float(fees or 0),
             "funding_pnl_usd": float(funding or 0),
         }
 
-    exprs = (n_expr, wins_expr, pnl_expr, r_expr, r_net_expr, fees_expr, funding_expr)
+    exprs = (
+        n_expr, wins_expr, pnl_expr, r_expr, r_net_expr, fees_expr, funding_expr,
+        pct_eq_expr,
+    )
     strat_rows = (
         await db.execute(
             select(MajorsBotTrade.strategy, *exprs)
@@ -187,6 +221,11 @@ def _serialize_trade(t: MajorsBotTrade) -> dict:
         "realized_pnl_usd": _f(t.realized_pnl_usd),
         "realized_r": _f(t.realized_r),
         "realized_r_net": _f(t.realized_r_net),
+        "realized_pct_equity": (
+            float(t.realized_pnl_usd / t.paper_equity_at_entry * 100)
+            if t.realized_pnl_usd is not None and t.paper_equity_at_entry
+            else None
+        ),
         "fees_usd": _f(t.fees_usd),
         "funding_pnl_usd": _f(t.funding_pnl_usd),
         "funding_rate_at_entry": _f(t.funding_rate_at_entry),
