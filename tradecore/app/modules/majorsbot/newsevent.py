@@ -70,7 +70,20 @@ ACTIVE_SYMBOLS_KEY = "symbols:active"
 # Sources whose items are primary events rather than media reporting. Anything
 # from these counts as a news leg regardless of keyword importance, because
 # importance there comes from the endpoint, not from a heuristic.
-PRIMARY_SOURCES = ("Binance Announcements", "Upbit Notices")
+# Keep in sync with newspulse/announcements.py *_SOURCE constants. Each entry
+# is a distinct population: the 2026-09-03 event study proved media legs were
+# significantly negative while primary ones were not, so a new source is never
+# an assumed-good addition — tag it, then measure it on its own before
+# concluding anything. `/majorsbot/analytics` groups by strategy, and
+# news_articles.source_name is what makes the per-source cut possible.
+PRIMARY_SOURCES = (
+    "Binance Announcements",
+    "Upbit Notices",
+    "Bithumb Notices",
+    "Bybit Announcements",
+    "OKX Announcements",
+    "KuCoin Announcements",
+)
 
 
 def _dt(ms: int) -> datetime:

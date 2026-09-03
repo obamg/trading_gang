@@ -264,9 +264,248 @@ async def test_one_failing_source_does_not_sink_the_rest(monkeypatch):
     async def empty(client, name, url):
         return []
 
+    async def empty_source(client):
+        return []
+
     monkeypatch.setattr(a, "fetch_binance", boom)
     monkeypatch.setattr(a, "fetch_upbit", ok)
     monkeypatch.setattr(a, "_fetch_regulator", empty)
+    # Every other source is stubbed too — without this the fan-out reaches the
+    # live Bithumb/Bybit/OKX/KuCoin endpoints, making a unit test network-bound
+    # and flaky. Any source added to fetch_announcements must be stubbed here.
+    for name in ("fetch_bithumb", "fetch_bybit", "fetch_okx", "fetch_kucoin"):
+        monkeypatch.setattr(a, name, empty_source)
 
     items = await a.fetch_announcements()
     assert [i["title"] for i in items] == ["Upbit notice"]
+
+
+# --- 2026-09-03: Bithumb / Bybit / OKX / KuCoin ---------------------------
+#
+# Added to multiply the primary-source sample, which is the binding constraint
+# on the newsevent forward test. Every payload below is a trimmed copy of a
+# real response captured from the prod VPS on 2026-09-03.
+#
+# The load-bearing property for all four: newsevent treats ANY item from a
+# primary source as a tradeable news leg, bypassing the importance scorer. So
+# a fetcher emitting promo noise creates trades out of nothing.
+
+from datetime import timezone as _tz  # noqa: E402
+
+
+# --- ticker extraction ----------------------------------------------------
+
+def test_all_paren_tickers_reads_every_parenthetical():
+    """Bithumb designates several coins per notice, one per parenthetical.
+    The first-group-only extractor tuned for Upbit silently dropped INJ."""
+    title = "코어(CORE), 인젝티브(INJ) 거래유의종목 지정"
+    assert a.extract_all_paren_tickers(title) == ["CORE", "INJ"]
+    # The Upbit-tuned extractor is why this function had to exist.
+    assert a.extract_paren_tickers(title) == ["CORE"]
+
+
+def test_all_paren_tickers_still_rejects_upbit_market_list():
+    """Widening to every parenthetical must not start eating the trailing
+    (KRW, BTC, USDT 마켓) quote-market list."""
+    title = "니어프로토콜(NEAR) KRW 마켓 추가 (KRW, BTC, USDT 마켓)"
+    assert a.extract_all_paren_tickers(title) == ["NEAR"]
+
+
+def test_all_paren_tickers_rejects_dates_and_times():
+    assert a.extract_all_paren_tickers("코스모스(ATOM) 입출금 중지 (09/03 재개)") == ["ATOM"]
+    assert a.extract_all_paren_tickers("리스트 (2026-08-19)") == []
+
+
+def test_venue_names_are_not_tickers():
+    """Live-data defect: every venue leads its headline with its own name, and
+    the upper-token extractor read OKX and EEA as coins."""
+    coins = a.extract_upper_tickers("OKX to list KAT and OKB on spot in EEA")
+    assert "OKX" not in coins and "EEA" not in coins
+    # OKB is a real tradeable token and must survive.
+    assert coins == ["KAT", "OKB"]
+
+
+# --- announcement classification -----------------------------------------
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("New listing: PONSUSDT Perpetual Contract, with up to 20x leverage", "bullish"),
+        ("OKX to list SLX/USDT (Solstice) for spot trading", "bullish"),
+        ("World Premiere: Cluster Protocol (CP) Listed on KuCoin", "bullish"),
+        ("HODLer Airdrops: Aligned (ALIGN) World Premiere Listing on KuCoin", "bullish"),
+        ("Delisting of ASPUSDT Perpetual Contract", "bearish"),
+        ("OKX to delist ULTI, GEAR, VRA, DAO, CXT and ELON in EEA", "bearish"),
+        # Promo noise that ships under the SAME announcement type as listings.
+        ("USDT Token Splash— Grab a share of the 100000 USDT prize pool .", None),
+        ("OKX Card x McLaren Technology Centre Giveaway Terms and Conditions", None),
+        ("KuCoin Copy Trading Upgrade: Now Supporting 630 Contract Trading Pairs", None),
+        # A migration is not a delisting.
+        ("OKX to support AERGO crypto migration", None),
+        # Non-crypto instruments published in the crypto listing feed.
+        ("New listing: CVXSTOCKUSDT TradFi Perpetual Contract", None),
+        ("KuCoin Futures Will List KUAISHOUUSDT and SHEINHKDUSDT Stock Index Perpetual Contracts", None),
+    ],
+)
+def test_classify_announcement(title, expected):
+    assert a.classify_announcement(title, "bullish") == expected
+
+
+def test_delisting_wins_over_listing_verb():
+    """'delist ... and relist' and similar tails must not read as bullish."""
+    assert a.classify_announcement("Bybit will delist X and list Y", "bullish") == "bearish"
+
+
+def test_listing_on_does_not_match_inside_delisting():
+    """compile_terms anchors on \\b, so `listing on` cannot match the tail of
+    'delisting on' — the over-permissive-substring bug this repo keeps hitting."""
+    assert a.classify_announcement("Notice on delisting on 2026-09-10", "bullish") == "bearish"
+
+
+# --- Bithumb --------------------------------------------------------------
+
+BITHUMB_PAYLOAD = [
+    {"categories": ["거래유의"], "title": "코어(CORE), 인젝티브(INJ) 거래유의종목 지정",
+     "pc_url": "https://feed.bithumb.com/notice/1654001", "published_at": "2026-09-01 17:00:00"},
+    {"categories": ["입출금"], "title": "코스모스(ATOM) 입출금 일시 중지 안내 (09/03 재개)",
+     "pc_url": "https://feed.bithumb.com/notice/1654675", "published_at": "2026-09-03 09:35:00"},
+    {"categories": ["이벤트"], "title": "빗썸 AI 사용하고 최대 300만원 상당 비트코인 받자!",
+     "pc_url": "https://feed.bithumb.com/notice/1654100", "published_at": "2026-09-01 17:13:21"},
+    {"categories": ["거래지원"], "title": "니어프로토콜(NEAR) 원화 마켓 추가",
+     "pc_url": "https://feed.bithumb.com/notice/1654200", "published_at": "2026-09-02 10:00:00"},
+]
+
+
+@pytest.mark.asyncio
+async def test_bithumb_emits_only_tradeable_notices():
+    def handler(request):
+        return httpx.Response(200, json=BITHUMB_PAYLOAD)
+
+    async with _client(handler) as client:
+        items = await a.fetch_bithumb(client)
+
+    by_title = {i["title"]: i for i in items}
+    # deposit-pause and promo are routine noise and must never become legs
+    assert len(items) == 2, [i["title"] for i in items]
+    caution = by_title["코어(CORE), 인젝티브(INJ) 거래유의종목 지정"]
+    assert caution["sentiment"] == "bearish"
+    assert caution["coins"] == "CORE,INJ"
+    assert caution["source_name"] == a.BITHUMB_SOURCE
+    assert caution["importance"] == "high"
+    listing = by_title["니어프로토콜(NEAR) 원화 마켓 추가"]
+    assert listing["sentiment"] == "bullish" and listing["coins"] == "NEAR"
+
+
+@pytest.mark.asyncio
+async def test_bithumb_published_at_is_converted_from_kst():
+    """Bithumb stamps wall-clock Seoul time with no offset. Reading it as UTC
+    would shift every notice 9h and push it outside newsevent's 15-min window."""
+    def handler(request):
+        return httpx.Response(200, json=[BITHUMB_PAYLOAD[0]])
+
+    async with _client(handler) as client:
+        items = await a.fetch_bithumb(client)
+
+    published = items[0]["published_at"]
+    assert published.tzinfo is not None
+    assert published.astimezone(_tz.utc).isoformat() == "2026-09-01T08:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_bithumb_tolerates_unexpected_shape():
+    def handler(request):
+        return httpx.Response(200, json={"error": "nope"})
+
+    async with _client(handler) as client:
+        assert await a.fetch_bithumb(client) == []
+
+
+@pytest.mark.asyncio
+async def test_bithumb_tolerates_http_error():
+    def handler(request):
+        return httpx.Response(503)
+
+    async with _client(handler) as client:
+        assert await a.fetch_bithumb(client) == []
+
+
+# --- Bybit / OKX / KuCoin -------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_bybit_filters_promos_and_keeps_listings():
+    payload = {"retCode": 0, "result": {"list": [
+        {"title": "New listing: PONSUSDT Perpetual Contract, with up to 20x leverage",
+         "url": "https://announcements.bybit.com/a/pons", "publishTime": 1788000000000},
+        {"title": "USDT Token Splash— Grab a share of the 100000 USDT prize pool .",
+         "url": "https://announcements.bybit.com/a/splash", "publishTime": 1788000001000},
+    ]}}
+
+    def handler(request):
+        return httpx.Response(200, json=payload)
+
+    async with _client(handler) as client:
+        items = await a.fetch_bybit(client)
+
+    # two ann types are fetched, so the single listing appears once per type
+    titles = {i["title"] for i in items}
+    assert titles == {"New listing: PONSUSDT Perpetual Contract, with up to 20x leverage"}
+    assert all(i["source_name"] == a.BYBIT_SOURCE for i in items)
+    assert items[0]["coins"] == "PONS"          # USDT suffix stripped
+
+
+@pytest.mark.asyncio
+async def test_okx_parses_string_millis_timestamp():
+    """OKX sends pTime as a STRING of epoch millis; Bybit/KuCoin send ints."""
+    payload = {"code": "0", "data": [{"details": [
+        {"title": "OKX to list SLX/USDT (Solstice) for spot trading",
+         "url": "https://okx.com/a/slx", "annType": "announcements-new-listings",
+         "pTime": "1783648816124"},
+    ]}]}
+
+    def handler(request):
+        return httpx.Response(200, json=payload)
+
+    async with _client(handler) as client:
+        items = await a.fetch_okx(client)
+
+    assert items and items[0]["coins"] == "SLX"
+    assert items[0]["published_at"].year == 2026
+
+
+@pytest.mark.asyncio
+async def test_kucoin_parses_items():
+    payload = {"code": "200000", "data": {"items": [
+        {"annId": 329319, "annTitle": "KuCoin Futures New Listing: CPUSDT Perpetual Contract",
+         "annUrl": "https://kucoin.com/a/cp", "cTime": 1788000000000},
+    ]}}
+
+    def handler(request):
+        return httpx.Response(200, json=payload)
+
+    async with _client(handler) as client:
+        items = await a.fetch_kucoin(client)
+
+    assert items and items[0]["coins"] == "CP"
+    assert items[0]["source_name"] == a.KUCOIN_SOURCE
+
+
+def test_ms_to_dt_accepts_int_and_string_and_rejects_junk():
+    assert a._ms_to_dt(1788000000000).year == 2026
+    assert a._ms_to_dt("1788000000000").year == 2026
+    assert a._ms_to_dt("not-a-number") is None
+    assert a._ms_to_dt(0) is None
+    assert a._ms_to_dt(None) is None
+
+
+# --- cross-module contract ------------------------------------------------
+
+def test_every_announcement_source_is_registered_primary():
+    """newsevent gates its news leg on PRIMARY_SOURCES. A source added here but
+    not registered there is collected and then silently never traded."""
+    from app.modules.majorsbot import newsevent as ne
+
+    emitted = {
+        a.BINANCE_SOURCE, a.UPBIT_SOURCE, a.BITHUMB_SOURCE,
+        a.BYBIT_SOURCE, a.OKX_SOURCE, a.KUCOIN_SOURCE,
+    }
+    assert emitted <= set(ne.PRIMARY_SOURCES)

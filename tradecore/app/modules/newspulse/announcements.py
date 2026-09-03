@@ -16,8 +16,26 @@ Sources and why each is here:
 - **Upbit notices.** Korean-market listings move price hard and Upbit's notice
   API is the primary publisher. Titles are Korean; category is parsed from
   fixed phrases, not translated.
+- **Bithumb notices** (added 2026-09-03). Korea's #2 exchange, the same
+  listing-pump mechanism as Upbit, and it additionally publishes
+  거래유의종목 지정 ("investment caution designation") — a Korean-specific
+  *bearish* catalyst nothing else in the pipeline sees.
+- **Bybit / OKX / KuCoin announcements** (added 2026-09-03). Official,
+  documented, keyless. Lower per-event impact than the Korean venues but they
+  multiply the primary-source sample, which is the binding constraint on the
+  newsevent forward test (0.45 paired signals/day → n≥30 was 3–4 months out).
 - **SEC / CFTC press releases.** Regulatory shocks, currently learned about
   5–10 min late via media RSS.
+
+**Why these fetchers filter hard.** ``newsevent`` treats *any* item from a
+PRIMARY source as a tradeable news leg, bypassing the keyword importance
+scorer entirely. So whatever these functions emit becomes a trade. Every
+exchange mixes promos into the same announcement feed ("USDT Token Splash —
+grab a share of the prize pool" is typed ``new_crypto`` on Bybit), so each
+fetcher **whitelists a listing/delisting verb phrase** rather than
+blacklisting promo words — the same word-boundary discipline that the
+newspulse keyword scorer needed. Anything unmatched is dropped and logged at
+debug so real phrasing can be learned from prod rather than guessed.
 
 **Rate limiting:** Binance BAPI throttles hard — six unspaced requests earned
 an empty 400, and it recovered once requests were ~5s apart. Catalogs are
@@ -39,7 +57,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -52,6 +70,9 @@ from app.modules.newspulse.text import (
 )
 
 USER_AGENT = "Mozilla/5.0 (compatible; TradeCore-NewsPulse/1.0)"
+
+# Bithumb publishes wall-clock Seoul time with no offset marker.
+KST = timezone(timedelta(hours=9))
 
 # --- Binance --------------------------------------------------------------
 
@@ -82,6 +103,96 @@ UPBIT_PAGE_SIZE = 20
 # 거래지원 종료 contains 거래지원, which also opens the listing phrase.
 UPBIT_BEARISH_MARKERS = ("거래지원 종료", "거래 종료", "상장폐지", "유의 종목")
 UPBIT_BULLISH_MARKERS = ("신규 거래지원", "거래지원 개시", "디지털 자산 추가", "마켓 추가")
+
+# --- Bithumb --------------------------------------------------------------
+
+# NOTE: this endpoint ALWAYS returns exactly the 5 most recent notices —
+# `count`, `page` and `category` are all accepted and all ignored (verified
+# 2026-09-03). There is no pagination and no backfill. At the 2-minute job
+# cadence that is ample for the observed ~30 notices/day, but a burst of >5
+# inside one tick would be lost. Do not add paging params expecting more.
+# `feed.bithumb.com` (the other documented host) sits behind a Cloudflare
+# challenge and 403s any non-browser client; api.bithumb.com does not.
+BITHUMB_URL = "https://api.bithumb.com/v1/notices"
+BITHUMB_SOURCE = "Bithumb Notices"
+# Categories are Korean and arrive as a list. Only these are tradeable:
+# 입출금 (deposit/withdrawal pauses) is routine chain-maintenance noise and
+# 이벤트 is pure promo — both are dropped.
+BITHUMB_CAUTION_CATEGORY = "거래유의"
+BITHUMB_BEARISH_MARKERS = (
+    "거래유의종목 지정",   # investment-caution designation
+    "거래지원 종료",       # delisting
+    "거래 종료",
+    "상장폐지",
+    "유의 종목",
+)
+BITHUMB_BULLISH_MARKERS = (
+    "마켓 추가",           # market added
+    "신규 거래지원",       # new trading support = listing
+    "거래지원 개시",
+    "원화 마켓 추가",
+)
+
+# --- Bybit / OKX / KuCoin -------------------------------------------------
+
+BYBIT_URL = "https://api.bybit.com/v5/announcements/index?locale=en-US&type={ann_type}&limit={limit}"
+BYBIT_SOURCE = "Bybit Announcements"
+BYBIT_TYPES: tuple[tuple[str, str], ...] = (("new_crypto", "bullish"), ("delistings", "bearish"))
+
+OKX_URL = "https://www.okx.com/api/v5/support/announcements?annType={ann_type}&page=1"
+OKX_SOURCE = "OKX Announcements"
+OKX_TYPES: tuple[tuple[str, str], ...] = (
+    ("announcements-new-listings", "bullish"),
+    ("announcements-delistings", "bearish"),
+)
+
+KUCOIN_URL = "https://api.kucoin.com/api/v3/announcements?pageSize={limit}&annType={ann_type}"
+KUCOIN_SOURCE = "KuCoin Announcements"
+KUCOIN_TYPES: tuple[tuple[str, str], ...] = (("new-listings", "bullish"), ("delistings", "bearish"))
+
+ANNOUNCEMENT_PAGE_SIZE = 20
+
+# Whitelisted verb phrases. An item must match one of these to be emitted at
+# all — see the module docstring on why this is a whitelist.
+LISTING_PHRASES = compile_terms({
+    "will list", "to list", "new listing", "new listings", "lists",
+    "listed on", "will launch", "to launch", "listing of", "will add",
+    "to add", "now live on", "completed the listing",
+    # "listing on" added after a live probe dropped a genuine listing:
+    # "HODLer Airdrops: Aligned (ALIGN) World Premiere Listing on KuCoin".
+    # Safe against "delisting on" because compile_terms anchors on \b, so
+    # `\blisting` cannot match inside "delisting" — and delisting is checked
+    # first regardless.
+    "listing on", "will be listed", "is now listed",
+})
+DELISTING_PHRASES = compile_terms({
+    "will delist", "to delist", "delist", "delists", "delisting",
+    "delisted", "will remove", "to remove", "removal of",
+    "will be removed", "termination of trading", "will cease trading",
+})
+# Non-crypto instruments these venues publish in the SAME announcement type:
+# TradFi/stock-index perps (CVXSTOCKUSDT, KUAISHOUUSDT, SHEINHKDUSDT). Their
+# "tickers" are not coins and would attribute to nothing — or worse, collide.
+NON_CRYPTO_MARKERS = compile_terms({
+    "tradfi", "stock index", "stock indices", "pre-market", "premarket",
+    "equity index", "tokenized stock", "tokenized equities", "xstock",
+})
+
+
+def classify_announcement(title: str, default_sentiment: str) -> str | None:
+    """bullish | bearish | None(=drop) for an English exchange announcement.
+
+    Delisting is checked FIRST: "will delist X and relist Y" is a delisting,
+    and several venues phrase removals with a listing verb in the tail.
+    """
+    if distinct_hits(NON_CRYPTO_MARKERS, title) >= 1:
+        return None
+    if distinct_hits(DELISTING_PHRASES, title) >= 1:
+        return "bearish"
+    if distinct_hits(LISTING_PHRASES, title) >= 1:
+        return "bullish"
+    return None
+
 
 # --- Regulators -----------------------------------------------------------
 
@@ -122,6 +233,14 @@ TICKER_STOPWORDS = {
     "ETF", "ETP", "AML", "FAQ", "USD", "TWAP", "VWAP", "PNL", "TVL", "AI",
     "CEO", "CFO", "SEC", "CFTC", "DEFI", "NEW", "AND", "THE", "FOR", "WILL",
     "ICYMI", "US", "UK", "EU", "UTC",
+    # Venue names. Every venue leads its own headline with its own name
+    # ("OKX to list SLX/USDT"), which extract_upper_tickers happily read as a
+    # ticker — observed attributing OKX and EEA as coins on live data.
+    # OKB, BNB, KCS etc. are NOT here: those are real tradeable tokens.
+    "OKX", "KUCOIN", "BYBIT", "BINANCE", "UPBIT", "BITHUMB", "MEXC", "HTX",
+    "GATE", "HODLER", "HODL",
+    # Jurisdictions / regions these venues scope announcements to.
+    "EEA", "EEE", "MENA", "APAC", "LATAM", "TR", "BR", "JP", "KR",
 }
 QUOTE_SUFFIXES = ("USDT", "USDC", "BUSD", "FDUSD", "TUSD")
 
@@ -165,6 +284,28 @@ def extract_paren_tickers(title: str) -> list[str]:
         return []
     cleaned = [_clean_ticker(t.strip()) for t in m.group(1).split(",")]
     return _dedupe([t for t in cleaned if t])
+
+
+def extract_all_paren_tickers(title: str) -> list[str]:
+    """Tickers from EVERY pure-ticker parenthetical, not just the first.
+
+    Bithumb puts one coin per parenthetical and lists several per notice:
+    ``코어(CORE), 인젝티브(INJ) 거래유의종목 지정`` designates two coins, and
+    ``extract_paren_tickers`` (first-group-only, tuned for Upbit's trailing
+    ``(KRW, BTC, USDT 마켓)``) would silently drop INJ.
+
+    Safe to widen here because the regex requires the whole parenthetical to
+    be tickers — Upbit's market list has trailing Korean and never matches,
+    and date/time parentheticals like ``(09/03 재개)`` are rejected by the
+    slash. Quote assets that do slip through are dropped by _clean_ticker.
+    """
+    out: list[str] = []
+    for m in PAREN_TICKERS_RE.finditer(title):
+        for raw in m.group(1).split(","):
+            cleaned = _clean_ticker(raw.strip())
+            if cleaned:
+                out.append(cleaned)
+    return _dedupe(out)
 
 
 def extract_upper_tickers(title: str) -> list[str]:
@@ -277,6 +418,198 @@ async def fetch_upbit(client: httpx.AsyncClient) -> list[dict]:
     return items
 
 
+def _bithumb_sentiment(title: str, categories: list[str]) -> str | None:
+    """bullish | bearish | None(=drop) for a Bithumb notice.
+
+    Bearish markers are checked before bullish for the same reason as Upbit:
+    거래지원 종료 (delisting) contains 거래지원, which opens the listing
+    phrase 신규 거래지원.
+    """
+    if any(marker in title for marker in BITHUMB_BEARISH_MARKERS):
+        return "bearish"
+    if any(marker in title for marker in BITHUMB_BULLISH_MARKERS):
+        return "bullish"
+    # Category is the fallback: a caution notice is bearish even if Bithumb
+    # rephrases the title. 입출금 / 이벤트 fall through to None and are dropped.
+    if BITHUMB_CAUTION_CATEGORY in categories:
+        return "bearish"
+    return None
+
+
+async def fetch_bithumb(client: httpx.AsyncClient) -> list[dict]:
+    try:
+        resp = await client.get(
+            BITHUMB_URL, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
+        log.warning("newspulse_bithumb_fetch_failed", err=str(e))
+        return []
+
+    if not isinstance(payload, list):
+        log.warning("newspulse_bithumb_unexpected_shape", type=type(payload).__name__)
+        return []
+
+    items: list[dict] = []
+    for notice in payload:
+        title = (notice.get("title") or "").strip()
+        url = notice.get("pc_url") or ""
+        if not title or not url:
+            continue
+        categories = [c for c in (notice.get("categories") or []) if c]
+        sentiment = _bithumb_sentiment(title, categories)
+        if sentiment is None:
+            log.debug("newspulse_bithumb_dropped", title=title[:80], categories=categories)
+            continue
+        # "2026-09-03 09:35:00", KST — Bithumb publishes wall-clock Seoul time
+        # with no offset. Parsing it as UTC would date-shift every notice by
+        # 9h and put it outside newsevent's 15-minute pairing window.
+        published = _parse_kst(notice.get("published_at"))
+        coins = extract_all_paren_tickers(title)
+        items.append({
+            "id": source_id_for(f"bithumb:{url}"),
+            "title": title,
+            "description": "",
+            "url": url,
+            "source_name": BITHUMB_SOURCE,
+            "published_at": published,
+            "importance": "high",
+            "sentiment": sentiment,
+            "coins": ",".join(coins) if coins else None,
+        })
+    return items
+
+
+async def _fetch_json_announcements(
+    client: httpx.AsyncClient,
+    *,
+    source_name: str,
+    url: str,
+    extract_rows,
+    default_sentiment: str,
+) -> list[dict]:
+    """Shared shell for the three English venues: fetch, filter, normalise.
+
+    ``extract_rows`` maps the venue payload to
+    ``(uid, title, url, published_at)`` tuples; everything after that —
+    the listing/delisting whitelist, ticker extraction, dict shape — is
+    identical across Bybit/OKX/KuCoin.
+    """
+    try:
+        resp = await client.get(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+        resp.raise_for_status()
+        payload = resp.json()
+    except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
+        log.warning("newspulse_announcement_fetch_failed", source=source_name, err=str(e))
+        return []
+
+    items: list[dict] = []
+    try:
+        rows = list(extract_rows(payload))
+    except (AttributeError, KeyError, TypeError, IndexError) as e:
+        log.warning("newspulse_announcement_parse_failed", source=source_name, err=str(e))
+        return []
+
+    for uid, title, article_url, published in rows:
+        title = (title or "").strip()
+        if not title or not uid:
+            continue
+        sentiment = classify_announcement(title, default_sentiment)
+        if sentiment is None:
+            log.debug("newspulse_announcement_dropped", source=source_name, title=title[:80])
+            continue
+        coins = extract_upper_tickers(title) or extract_paren_tickers(title)
+        items.append({
+            "id": source_id_for(f"{source_name}:{uid}"),
+            "title": title,
+            "description": "",
+            "url": article_url or "",
+            "source_name": source_name,
+            "published_at": published or datetime.now(timezone.utc),
+            "importance": "high",
+            "sentiment": sentiment,
+            "coins": ",".join(coins) if coins else None,
+        })
+    return items
+
+
+def _ms_to_dt(value) -> datetime | None:
+    """Epoch-millis -> aware UTC. OKX sends pTime as a *string* of millis,
+    Bybit/KuCoin send ints, so both are accepted."""
+    if isinstance(value, str):
+        value = value.strip()
+        if not value.lstrip("-").isdigit():
+            return None
+        value = int(value)
+    if not isinstance(value, (int, float)) or value <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _parse_kst(raw) -> datetime:
+    """'YYYY-MM-DD HH:MM:SS' in Asia/Seoul (UTC+9) -> aware UTC datetime."""
+    try:
+        naive = datetime.strptime(str(raw).strip(), "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return datetime.now(timezone.utc)
+    return naive.replace(tzinfo=KST).astimezone(timezone.utc)
+
+
+async def fetch_bybit(client: httpx.AsyncClient) -> list[dict]:
+    def rows(payload):
+        for a in ((payload.get("result") or {}).get("list") or []):
+            yield (
+                a.get("url"), a.get("title"), a.get("url"),
+                _ms_to_dt(a.get("publishTime")) or _ms_to_dt(a.get("dateTimestamp")),
+            )
+
+    out: list[dict] = []
+    for ann_type, sentiment in BYBIT_TYPES:
+        out.extend(await _fetch_json_announcements(
+            client, source_name=BYBIT_SOURCE,
+            url=BYBIT_URL.format(ann_type=ann_type, limit=ANNOUNCEMENT_PAGE_SIZE),
+            extract_rows=rows, default_sentiment=sentiment,
+        ))
+    return out
+
+
+async def fetch_okx(client: httpx.AsyncClient) -> list[dict]:
+    def rows(payload):
+        for block in (payload.get("data") or []):
+            for a in (block.get("details") or []):
+                yield (a.get("url"), a.get("title"), a.get("url"), _ms_to_dt(a.get("pTime")))
+
+    out: list[dict] = []
+    for ann_type, sentiment in OKX_TYPES:
+        out.extend(await _fetch_json_announcements(
+            client, source_name=OKX_SOURCE, url=OKX_URL.format(ann_type=ann_type),
+            extract_rows=rows, default_sentiment=sentiment,
+        ))
+    return out
+
+
+async def fetch_kucoin(client: httpx.AsyncClient) -> list[dict]:
+    def rows(payload):
+        for a in ((payload.get("data") or {}).get("items") or []):
+            yield (
+                a.get("annId"), a.get("annTitle"), a.get("annUrl"),
+                _ms_to_dt(a.get("cTime")),
+            )
+
+    out: list[dict] = []
+    for ann_type, sentiment in KUCOIN_TYPES:
+        out.extend(await _fetch_json_announcements(
+            client, source_name=KUCOIN_SOURCE,
+            url=KUCOIN_URL.format(ann_type=ann_type, limit=ANNOUNCEMENT_PAGE_SIZE),
+            extract_rows=rows, default_sentiment=sentiment,
+        ))
+    return out
+
+
 def is_crypto_relevant(title: str, description: str) -> bool:
     return distinct_hits(CRYPTO_RELEVANCE, f"{title} {description}") >= 1
 
@@ -312,6 +645,10 @@ async def fetch_announcements() -> list[dict]:
         groups = await asyncio.gather(
             fetch_binance(client),
             fetch_upbit(client),
+            fetch_bithumb(client),
+            fetch_bybit(client),
+            fetch_okx(client),
+            fetch_kucoin(client),
             *(_fetch_regulator(client, name, url) for name, url in REGULATOR_FEEDS),
             return_exceptions=True,
         )
