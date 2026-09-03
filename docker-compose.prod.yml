@@ -123,7 +123,7 @@ services:
       # 10x notional. Measured on 533 real volume-leg events: 4.7% of entries
       # hit liquidation (9.5% adverse move) within the 6h hold, each costing
       # ~95% of equity => ~24% chance of reaching n=30 without one.
-      MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT: ${MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT:-10}
+      MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT: ${MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT:-5}
       # Must be 1: notional = 10x equity means margin = the whole account, so
       # a second concurrent position is not fundable. Paper does not enforce
       # margin, so a higher value would silently simulate the impossible.
@@ -194,7 +194,7 @@ services:
       # 10x notional. Measured on 533 real volume-leg events: 4.7% of entries
       # hit liquidation (9.5% adverse move) within the 6h hold, each costing
       # ~95% of equity => ~24% chance of reaching n=30 without one.
-      MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT: ${MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT:-10}
+      MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT: ${MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT:-5}
       # Must be 1: notional = 10x equity means margin = the whole account, so
       # a second concurrent position is not fundable. Paper does not enforce
       # margin, so a higher value would silently simulate the impossible.

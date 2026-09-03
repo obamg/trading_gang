@@ -41,7 +41,7 @@ const STRATEGY_META: Record<
   newsevent: {
     label: "newsevent",
     color: "#F59E0B",
-    blurb: "exchange announcement + volume — 5m retrace limits, stopless 10x",
+    blurb: "exchange announcement + volume — 5m retrace limits, stopless 5x",
   },
 };
 

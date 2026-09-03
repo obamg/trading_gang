@@ -82,8 +82,14 @@ NEWSEVENT_MIN_TRADES = 30             # pre-committed evaluation gate
 # 1h −0.050%, 6h −0.067%) with a sub-50% hit rate, while the median adverse
 # excursion in the first 30 minutes was −0.29% — the retrace we were paying for
 # every time. A limit half-way back from the spike close to the bar's adverse
-# extreme lifted per-signal expectancy from +0.29% to +1.82% of equity (10x,
-# net of fees) at a 73% fill rate.
+# extreme lifted per-signal expectancy from +0.29% to +1.82% of equity at a
+# 73% fill rate.
+#
+# Every %-of-equity figure in this file was measured at **10x**, the leverage
+# live at the time. They scale linearly with the notional cap (P&L as a % of
+# equity = price move x leverage), so at the current 5x they halve: +0.145% ->
+# +0.91%. The ranking is leverage-invariant, which is the whole point — the
+# comparison survives the dial, the magnitudes do not.
 #
 # Anchored on the CLOSE, not the bar midpoint. volevent's (h+l)/2 measured
 # materially worse here (+0.18% vs +1.82%), and it has a structural flaw for

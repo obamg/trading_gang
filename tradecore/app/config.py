@@ -175,8 +175,15 @@ class Settings(BaseSettings):
     majorsbot_newsevent_enabled: bool = False
     # Notional cap as a MULTIPLE of equity, i.e. effective leverage: 1.0 = 1x,
     # 20.0 = 20x. Separate from majorsbot_position_size_pct so newsevent can be
-    # sized without touching volevent's live forward test. Leverage is still an
-    # *outcome* of risk% / stop-distance — this is the ceiling, not the target.
+    # sized without touching volevent's live forward test.
+    #
+    # With stops OFF this is not a ceiling, it IS the size — the risk% knob is
+    # inert, every position lands at exactly this leverage, and liquidation is
+    # the only loss cap. Prod ran 10x through the first 11 trades and took
+    # −57.6% and −48.3% of the book on two of them; XRP reached −79.3% (a 7.9%
+    # adverse move against a 9.5% liquidation threshold). Measured liquidation
+    # rate over 533 real volume-leg events: 3x 0.0% / 5x 0.2% / 10x 4.7% /
+    # 20x 17.8%. Prod moved to 5x on 2026-09-03.
     majorsbot_newsevent_position_size_pct: float = 1.0
     majorsbot_newsevent_risk_per_trade_pct: float = 0.0025
     majorsbot_newsevent_max_concurrent: int = 3
