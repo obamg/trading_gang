@@ -27,6 +27,7 @@ from app.modules.cmcpulse import collector as cmcpulse_collector
 from app.modules.liquidmap import tracker as liquidmap_tracker
 from app.modules.positionmonitor import monitor as positionmonitor
 from app.modules.walletwatch import detector as walletwatch_detector
+from app.modules.walletwatch import pruner as walletwatch_pruner
 from app.modules.walletwatch.discovery import engine as discovery_engine
 from app.modules.walletwatch.discovery import promote as discovery_promote
 from app.modules.majorsbot import engine as majorsbot_engine
@@ -290,6 +291,19 @@ def start_scheduler() -> AsyncIOScheduler:
         id="walletwatch_scan",
         coalesce=True,
         max_instances=1,
+    )
+    # Anti-bot guard: deactivate watched addresses whose swap rate marks them
+    # as MEV/HFT rather than smart money. Runs hourly — a bot promoted just
+    # after a tick costs at most an hour of load, and the check is one
+    # aggregate query.
+    sched.add_job(
+        walletwatch_pruner.run_prune_job,
+        "interval",
+        hours=1,
+        id="walletwatch_prune",
+        coalesce=True,
+        max_instances=1,
+        next_run_time=datetime.now(timezone.utc),
     )
     sched.add_job(
         discovery_engine.refresh_candidates_job,

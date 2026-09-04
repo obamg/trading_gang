@@ -31,6 +31,22 @@ CG_PLATFORM = {
 }
 CG_BASE = "https://api.coingecko.com/api/v3"
 PRICE_TTL_SECONDS = 3600
+# A FAILED lookup is cached too, for a shorter window. Without this the module
+# rate-limit spirals: a 429 returned early without writing any cache entry, so
+# the next tick re-requested the identical contract, earned another 429, and
+# never cached — 13,955 failed calls in 24h against a 30/min demo quota, with
+# only 28 price keys in Redis to show for it. Short TTL so a transient outage
+# costs minutes of staleness, not an hour.
+FAILURE_TTL_SECONDS = 600
+# Sentinel distinguishing "asked, got no price" from "ask failed". Both stop
+# the retry, but only the latter should expire quickly.
+_FAILURE_MARKER = "err"
+
+# Circuit breaker. While this key is set every caller returns immediately
+# without touching the network, so one rate-limit does not turn into a
+# thundering herd across 32 wallets x thousands of swaps.
+CG_BREAKER_KEY = "walletwatch:cg:breaker"
+BREAKER_SECONDS = 300
 
 
 def _cache_key(chain: str, addr: str) -> str:
@@ -44,15 +60,23 @@ async def get_token_usd_price(chain: str, addr: str) -> float | None:
     r = redis_service.get_redis()
     key = _cache_key(chain, addr)
     cached = await r.get(key)
-    if cached:
+    if cached is not None:
+        raw = cached.decode() if isinstance(cached, bytes) else cached
+        if raw == _FAILURE_MARKER:
+            return None
         try:
-            return float(cached)
+            return float(raw)
         except (TypeError, ValueError):
             pass
 
     platform = CG_PLATFORM.get(chain)
     if not platform:
         return None
+
+    # Breaker open: skip the call entirely rather than adding to the pile-up.
+    if await r.get(CG_BREAKER_KEY):
+        return None
+
     params = {
         "contract_addresses": addr,
         "vs_currencies": "usd",
@@ -71,7 +95,19 @@ async def get_token_usd_price(chain: str, addr: str) -> float | None:
             resp.raise_for_status()
             data = resp.json()
     except Exception as e:
-        log.debug("walletwatch_cg_lookup_failed", chain=chain, addr=addr, err=str(e))
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 429:
+            # Trip the breaker for everyone, not just this contract — the quota
+            # is per-key, so another contract would fail identically.
+            await r.set(CG_BREAKER_KEY, "1", ex=BREAKER_SECONDS)
+            log.warning(
+                "walletwatch_cg_rate_limited",
+                chain=chain, addr=addr, breaker_seconds=BREAKER_SECONDS,
+            )
+        else:
+            log.debug("walletwatch_cg_lookup_failed", chain=chain, addr=addr, err=str(e))
+        # Cache the failure so the next tick does not re-ask immediately.
+        await r.set(key, _FAILURE_MARKER, ex=FAILURE_TTL_SECONDS)
         return None
 
     # CG returns lower-case key for EVM, original case for Solana.

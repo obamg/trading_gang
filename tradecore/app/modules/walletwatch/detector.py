@@ -58,9 +58,11 @@ async def _set_cursor(chain: str, addr: str, value: str | int) -> None:
 async def _list_watched(db: AsyncSession) -> list[tuple[WhaleEntityAddress, WhaleEntity | None]]:
     rows = (
         await db.execute(
-            select(WhaleEntityAddress, WhaleEntity).join(
+            select(WhaleEntityAddress, WhaleEntity)
+            .join(
                 WhaleEntity, WhaleEntity.id == WhaleEntityAddress.entity_id, isouter=True
             )
+            .where(WhaleEntityAddress.is_active.is_(True))
         )
     ).all()
     return [(a, e) for (a, e) in rows]

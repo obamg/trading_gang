@@ -3,7 +3,16 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,8 +52,18 @@ class WhaleEntityAddress(Base):
     chain: Mapped[str] = mapped_column(String(50), nullable=False)
     label: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = created_at_col()
+    # False takes the address out of the WalletWatch scan without losing the
+    # row or its PnL-discovery provenance. Set by the high-frequency pruner.
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
+    )
+    deactivated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deactivated_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     __table_args__ = (
         Index("idx_whale_addr_entity", "entity_id"),
         Index("idx_whale_addr_address", "address", unique=True),
+        Index("idx_whale_addr_active", "is_active"),
     )

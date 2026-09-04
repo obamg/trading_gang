@@ -99,6 +99,13 @@ class Settings(BaseSettings):
     # WalletWatch — DEX swap tracking for labeled smart-money wallets.
     walletwatch_enabled: bool = False
     walletwatch_min_usd: float = 25_000.0
+    # Daily swap ceiling above which a watched address is auto-deactivated as a
+    # bot. discovery scores on PnL / win-rate / breadth and never penalises
+    # frequency, so it promoted MEV bots: measured 2026-09-04, five addresses
+    # produced 78k of 80k daily swaps, one of them 35,019 on its own. Real
+    # smart-money wallets sat at 0–323/day, so the gap is wide and 500 cuts
+    # inside it. 0 disables the pruner. See walletwatch/pruner.py.
+    walletwatch_max_swaps_per_day: int = 500
     alchemy_api_key: str = ""
     helius_api_key: str = ""
     # One Etherscan V2 key covers BSC, Arbitrum, Base, Polygon, Optimism, etc.
