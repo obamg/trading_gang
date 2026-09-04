@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as app_settings
@@ -65,6 +65,31 @@ async def promote_score(
             "ok": True,
             "reason": "already_promoted",
             "entity_id": str(score.promoted_entity_id) if score.promoted_entity_id else None,
+            "wallet_address": score.wallet_address,
+        }
+
+    # Never re-add an address the pruner already threw out. Scoring carries no
+    # frequency signal at all (win_count+loss_count counts CLOSED POSITIONS —
+    # a wallet doing 16,633 swaps/day scores 12), so a bot can look excellent
+    # here forever and would otherwise be promoted, pruned, and promoted again
+    # every cycle. The unique index on `address` would reject the duplicate
+    # anyway, but silently, inside a swallowed exception.
+    existing = (
+        await db.execute(
+            select(WhaleEntityAddress).where(
+                func.lower(WhaleEntityAddress.address) == (score.wallet_address or "").lower()
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        score.promoted_at = datetime.now(timezone.utc)
+        score.promoted_entity_id = existing.entity_id
+        return {
+            "ok": True,
+            "reason": "address_already_watched"
+            if existing.is_active
+            else "address_deactivated",
+            "entity_id": str(existing.entity_id),
             "wallet_address": score.wallet_address,
         }
 
@@ -149,7 +174,15 @@ async def auto_promote_job() -> None:
                 try:
                     result = await promote_score(db, score)
                     await db.commit()
-                    if result.get("reason") == "already_promoted":
+                    # Any `reason` means nothing was actually added — counting
+                    # it as a promotion would also publish a walletwatch alert
+                    # for a wallet we did not start watching.
+                    if result.get("reason"):
+                        log.info(
+                            "discovery_auto_promote_skipped",
+                            wallet=score.wallet_address,
+                            reason=result["reason"],
+                        )
                         continue
                     promoted += 1
                     await _publish_promotion_alert(score, result["entity_id"])

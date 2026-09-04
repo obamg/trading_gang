@@ -302,3 +302,196 @@ def test_swap_event_shape_is_decimal():
     assert ev["token_out_address"] == BONK
     assert ev["token_out_amount"] == Decimal("50000")  # 5_000_000_000 / 10^5
     assert ev["venue"] == "jupiter"
+
+
+# ---------- 2026-09-04: CoinGecko rate-limit spiral + bot pruning ----------
+#
+# Measured on prod: 13,955 failed CoinGecko calls in 24h against a 30/min demo
+# quota, with only 28 price keys cached — because a failed lookup returned
+# early WITHOUT writing any cache entry, so the next tick re-asked the same
+# contract, earned another 429, and never cached. Self-sustaining.
+
+import httpx  # noqa: E402
+
+from app.modules.walletwatch import pricing, pruner  # noqa: E402
+
+
+class _Resp:
+    def __init__(self, status):
+        self.status_code = status
+
+
+def _http_error(status):
+    err = httpx.HTTPStatusError("boom", request=None, response=_Resp(status))
+    return err
+
+
+@pytest.mark.asyncio
+async def test_failed_lookup_is_negative_cached(monkeypatch, fake_redis):
+    """THE bug: a failure must leave a cache entry, or every tick re-asks."""
+    monkeypatch.setattr(pricing.redis_service, "get_redis", lambda: fake_redis)
+
+    calls = {"n": 0}
+
+    class _Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k):
+            calls["n"] += 1
+            raise _http_error(500)
+
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda **kw: _Client())
+
+    assert await pricing.get_token_usd_price("ethereum", PEPE) is None
+    assert calls["n"] == 1
+    # Second call must be served from the negative cache, not the network.
+    assert await pricing.get_token_usd_price("ethereum", PEPE) is None
+    assert calls["n"] == 1, "failure was not cached — the 429 spiral is back"
+
+
+@pytest.mark.asyncio
+async def test_429_trips_the_breaker_for_other_tokens(monkeypatch, fake_redis):
+    """The quota is per-key, so a 429 on one contract means every other
+    contract would fail too. One rate-limit must not become 32 wallets x
+    thousands of swaps worth of retries."""
+    monkeypatch.setattr(pricing.redis_service, "get_redis", lambda: fake_redis)
+
+    calls = {"n": 0}
+
+    class _Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k):
+            calls["n"] += 1
+            raise _http_error(429)
+
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda **kw: _Client())
+
+    assert await pricing.get_token_usd_price("ethereum", PEPE) is None
+    assert calls["n"] == 1
+    assert await fake_redis.get(pricing.CG_BREAKER_KEY) is not None
+
+    # A DIFFERENT, uncached contract must now short-circuit on the breaker.
+    assert await pricing.get_token_usd_price("ethereum", WBTC) is None
+    assert calls["n"] == 1, "breaker did not stop the next contract"
+
+
+@pytest.mark.asyncio
+async def test_successful_price_still_cached_and_returned(monkeypatch, fake_redis):
+    monkeypatch.setattr(pricing.redis_service, "get_redis", lambda: fake_redis)
+
+    class _Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k):
+            class _R:
+                def raise_for_status(self): pass
+                def json(self): return {PEPE.lower(): {"usd": 0.0000123}}
+            return _R()
+
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda **kw: _Client())
+    price = await pricing.get_token_usd_price("ethereum", PEPE)
+    assert price == pytest.approx(0.0000123)
+    assert await fake_redis.get(pricing._cache_key("ethereum", PEPE)) is not None
+
+
+@pytest.mark.asyncio
+async def test_stable_leg_never_calls_coingecko(monkeypatch):
+    """The cheapest fix is the existing one: a stable leg IS the USD size."""
+    async def boom(*a, **k):
+        raise AssertionError("CoinGecko must not be called when a leg is stable")
+
+    monkeypatch.setattr(pricing, "get_token_usd_price", boom)
+    usd = await pricing.estimate_swap_usd(
+        "ethereum", USDC_ETH, Decimal("482000"), PEPE, Decimal("1")
+    )
+    assert usd == 482000.0
+
+
+# ---------- pruner ----------
+
+class _Addr:
+    def __init__(self, address, is_active=True):
+        self.address = address
+        self.is_active = is_active
+        self.deactivated_at = None
+        self.deactivated_reason = None
+
+
+class _PruneDB:
+    """Returns swap counts for the first query, active addresses for the second."""
+    def __init__(self, counts, addrs):
+        self._counts = counts
+        self._addrs = addrs
+        self._n = 0
+        self.committed = False
+
+    async def execute(self, *a, **k):
+        self._n += 1
+        outer = self
+
+        class _R:
+            def all(self_inner):
+                return [(addr, n) for addr, n in outer._counts.items()]
+
+            def scalars(self_inner):
+                class _S:
+                    def all(s2): return outer._addrs
+                return _S()
+        return _R()
+
+    async def commit(self):
+        self.committed = True
+
+
+@pytest.mark.asyncio
+async def test_pruner_deactivates_only_high_frequency(monkeypatch):
+    """Real prod distribution: bots at 6k-35k swaps/day, humans at 0-323."""
+    monkeypatch.setattr(
+        pruner.app_settings, "walletwatch_max_swaps_per_day", 500, raising=False
+    )
+    bot = _Addr("0x6747BCAF9BD5A5F0758CBE08903490E45DDFACB5")   # 35,019/day
+    noisy = _Addr("0x1f2f10d1c40777ae1da742455c65828ff36df387")  # 16,633/day
+    human = _Addr("0x42e213a3ad048e899b89ea8cb11d21bc97b84748")  # 323/day
+    quiet = _Addr("0xd8da6bf26964af9d7eed9e03e53415d37aa96045")  # 0/day
+
+    counts = {
+        bot.address.lower(): 35019,
+        noisy.address.lower(): 16633,
+        human.address.lower(): 323,
+    }
+    db = _PruneDB(counts, [bot, noisy, human, quiet])
+    result = await pruner.prune_high_frequency(db)
+
+    assert result["pruned"] == 2
+    assert bot.is_active is False and noisy.is_active is False
+    assert bot.deactivated_reason == pruner.REASON_HIGH_FREQUENCY
+    assert bot.deactivated_at is not None
+    # Below the ceiling — must be untouched.
+    assert human.is_active is True and quiet.is_active is True
+    assert human.deactivated_at is None
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_pruner_matches_addresses_case_insensitively(monkeypatch):
+    """Swap rows and address rows disagree on case; a case-sensitive join
+    would silently count zero swaps and prune nothing."""
+    monkeypatch.setattr(
+        pruner.app_settings, "walletwatch_max_swaps_per_day", 500, raising=False
+    )
+    addr = _Addr("0xABCDEF0123456789ABCDEF0123456789ABCDEF01")
+    db = _PruneDB({addr.address.lower(): 9000}, [addr])
+    assert (await pruner.prune_high_frequency(db))["pruned"] == 1
+    assert addr.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_pruner_disabled_by_zero_ceiling(monkeypatch):
+    monkeypatch.setattr(
+        pruner.app_settings, "walletwatch_max_swaps_per_day", 0, raising=False
+    )
+    addr = _Addr("0xdeadbeef")
+    db = _PruneDB({"0xdeadbeef": 99999}, [addr])
+    assert (await pruner.prune_high_frequency(db)) == {"skipped": "disabled"}
+    assert addr.is_active is True
