@@ -283,3 +283,117 @@ class TestPromoteHelpers:
 
         s = _ScoreStub(win_rate=Decimal("1.0"), token_count=20)
         assert _conviction_for(s) == Decimal("1.0")
+
+
+# ---------- 2026-09-04: the same rate-limit spiral, in discovery ----------
+#
+# discovery/pricing.py carried an identical defect to the swap pricer fixed in
+# PR #20: the cache was only written `if series`, so BOTH a failed call and a
+# successful-but-empty one left no entry and were re-asked on every re-score.
+# Dormant at the time only because scoring had not needed prices recently.
+
+import httpx as _httpx  # noqa: E402
+import pytest as _pytest  # noqa: E402
+
+from app.modules.walletwatch import pricing as _swap_pricing  # noqa: E402
+from app.modules.walletwatch.discovery import pricing as _disc_pricing  # noqa: E402
+
+
+class _R:
+    def __init__(self, status):
+        self.status_code = status
+
+
+def _err(status):
+    return _httpx.HTTPStatusError("boom", request=None, response=_R(status))
+
+
+def _fake_client(behaviour):
+    class _C:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k): return behaviour()
+    return lambda **kw: _C()
+
+
+@_pytest.mark.asyncio
+async def test_discovery_failed_series_is_negative_cached(monkeypatch, fake_redis):
+    monkeypatch.setattr(_disc_pricing.redis_service, "get_redis", lambda: fake_redis)
+    calls = {"n": 0}
+
+    def behaviour():
+        calls["n"] += 1
+        raise _err(500)
+
+    monkeypatch.setattr(_disc_pricing.httpx, "AsyncClient", _fake_client(behaviour))
+
+    assert await _disc_pricing.get_price_series("ethereum", "0xabc", 0, 3_600_000) == []
+    assert calls["n"] == 1
+    assert await _disc_pricing.get_price_series("ethereum", "0xabc", 0, 3_600_000) == []
+    assert calls["n"] == 1, "failure not cached — discovery re-asks every re-score"
+
+
+@_pytest.mark.asyncio
+async def test_discovery_empty_series_is_cached(monkeypatch, fake_redis):
+    """A successful-but-empty response is a real answer, not a miss."""
+    monkeypatch.setattr(_disc_pricing.redis_service, "get_redis", lambda: fake_redis)
+    calls = {"n": 0}
+
+    def behaviour():
+        calls["n"] += 1
+
+        class _Resp:
+            def raise_for_status(self): pass
+            def json(self): return {"prices": []}
+        return _Resp()
+
+    monkeypatch.setattr(_disc_pricing.httpx, "AsyncClient", _fake_client(behaviour))
+
+    assert await _disc_pricing.get_price_series("ethereum", "0xdef", 0, 3_600_000) == []
+    assert await _disc_pricing.get_price_series("ethereum", "0xdef", 0, 3_600_000) == []
+    assert calls["n"] == 1, "empty series re-fetched — the original bug"
+
+
+@_pytest.mark.asyncio
+async def test_discovery_shares_the_breaker_with_the_swap_pricer(monkeypatch, fake_redis):
+    """One CoinGecko quota, one breaker: a 429 raised by discovery must stop
+    the swap pricer too, and vice versa."""
+    monkeypatch.setattr(_disc_pricing.redis_service, "get_redis", lambda: fake_redis)
+    monkeypatch.setattr(_swap_pricing.redis_service, "get_redis", lambda: fake_redis)
+    calls = {"n": 0}
+
+    def behaviour():
+        calls["n"] += 1
+        raise _err(429)
+
+    monkeypatch.setattr(_disc_pricing.httpx, "AsyncClient", _fake_client(behaviour))
+
+    await _disc_pricing.get_price_series("ethereum", "0x111", 0, 3_600_000)
+    assert calls["n"] == 1
+    assert await fake_redis.get(_swap_pricing.CG_BREAKER_KEY) is not None
+
+    # The swap pricer must now short-circuit on the breaker discovery tripped.
+    swap_calls = {"n": 0}
+
+    def swap_behaviour():
+        swap_calls["n"] += 1
+        raise _err(429)
+
+    monkeypatch.setattr(_swap_pricing.httpx, "AsyncClient", _fake_client(swap_behaviour))
+    assert await _swap_pricing.get_token_usd_price("ethereum", "0x222") is None
+    assert swap_calls["n"] == 0, "breaker is not shared across the two callers"
+
+
+@_pytest.mark.asyncio
+async def test_discovery_skips_network_while_breaker_open(monkeypatch, fake_redis):
+    monkeypatch.setattr(_disc_pricing.redis_service, "get_redis", lambda: fake_redis)
+    await fake_redis.set(_swap_pricing.CG_BREAKER_KEY, "1", ex=300)
+    calls = {"n": 0}
+
+    def behaviour():
+        calls["n"] += 1
+        raise AssertionError("must not call CoinGecko while the breaker is open")
+
+    monkeypatch.setattr(_disc_pricing.httpx, "AsyncClient", _fake_client(behaviour))
+    assert await _disc_pricing.get_price_series("ethereum", "0x333", 0, 3_600_000) == []
+    assert calls["n"] == 0
