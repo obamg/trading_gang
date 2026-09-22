@@ -51,8 +51,14 @@ PY
 fi
 
 if [[ "${RUN_MIGRATIONS}" == "1" ]]; then
-  log "running alembic upgrade head"
-  alembic upgrade head
+  # Not a bare `alembic upgrade head`: that cannot succeed on an EMPTY
+  # database, because 001_initial is a Base.metadata.create_all baseline and
+  # replaying 002..N on top of it conflicts with itself. bootstrap_db picks
+  # the right strategy from the database's actual state — and for an already
+  # versioned database (prod, any existing dev volume) it runs exactly
+  # `alembic upgrade head`, unchanged.
+  log "bringing database to head"
+  python -m app.scripts.bootstrap_db
 fi
 
 if [[ "${RUN_SEED}" == "1" ]]; then
