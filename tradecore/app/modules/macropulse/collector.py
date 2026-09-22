@@ -17,11 +17,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.macro import EconomicEvent, MacroSnapshot
-from app.services import redis_service
+from app.services import cmc_client, redis_service
 
 YF_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=5d&interval=1d"
 COINGECKO_STABLES = (
     "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=stablecoins&per_page=50&page=1"
+)
+# CMC has no stablecoin-category aggregate on the cheap endpoints, so the
+# basket is explicit. These carry the overwhelming majority of stablecoin
+# market cap; the tail moves the total by well under a percent and does not
+# change the direction, which is what the score reads.
+STABLE_SYMBOLS = (
+    "USDT", "USDC", "DAI", "USDE", "FDUSD", "PYUSD", "TUSD", "USDD", "USDS",
 )
 TICKERS = {
     "dxy": "DX-Y.NYB",
@@ -80,6 +87,32 @@ async def collect_market_data() -> dict[str, dict]:
 
 
 async def _fetch_stablecoin_mcap(client: httpx.AsyncClient) -> float | None:
+    """Total stablecoin market cap in USD. CMC first, CoinGecko fallback.
+
+    The two sources are not identical: CoinGecko's ``category=stablecoins``
+    sweeps ~50 coins, while STABLE_SYMBOLS is the majors. The number feeds a
+    *trend* (is stablecoin supply expanding?), not an absolute level, so the
+    smaller basket is fine — but mixing sources across consecutive snapshots
+    would put a step in that trend, which is why CMC is primary and CG only
+    fills a gap rather than alternating.
+    """
+    try:
+        data = await cmc_client.quotes_latest(list(STABLE_SYMBOLS))
+    except Exception as e:  # cmc_client soft-fails, but never trust that
+        data = None
+        log.warning("cmc_stables_failed", err=str(e))
+    if data:
+        total = 0.0
+        for entry in data.values():
+            # A symbol CMC maps to several listings comes back as a list.
+            for coin in (entry if isinstance(entry, list) else [entry]):
+                if not isinstance(coin, dict):
+                    continue
+                mcap = ((coin.get("quote") or {}).get("USD") or {}).get("market_cap")
+                total += float(mcap or 0)
+        if total > 0:
+            return total
+
     try:
         resp = await client.get(COINGECKO_STABLES, timeout=15.0)
         resp.raise_for_status()

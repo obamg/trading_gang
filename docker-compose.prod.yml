@@ -79,6 +79,10 @@ services:
       TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-false}
       WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      # Empty = CMC disabled; every caller falls back to its previous
+      # source (CoinGecko / the keyless trending scrape). The free Basic
+      # plan gives 15k credits/month; /cmcpulse/credits reports spend.
+      CMC_API_KEY: ${CMC_API_KEY:-}
       SANTIMENT_API_KEY: ${SANTIMENT_API_KEY:-}
       # SANAPI FREE serves data >30d old and rejects a query whose `to` is past
       # that ceiling. Set to 0 on a paid plan to collect up to today.
@@ -202,6 +206,10 @@ services:
       SCHEDULER_ENABLED: "true"
       WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      # Empty = CMC disabled; every caller falls back to its previous
+      # source (CoinGecko / the keyless trending scrape). The free Basic
+      # plan gives 15k credits/month; /cmcpulse/credits reports spend.
+      CMC_API_KEY: ${CMC_API_KEY:-}
       SANTIMENT_API_KEY: ${SANTIMENT_API_KEY:-}
       # SANAPI FREE serves data >30d old and rejects a query whose `to` is past
       # that ceiling. Set to 0 on a paid plan to collect up to today.

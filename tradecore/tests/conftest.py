@@ -94,6 +94,11 @@ class FakeRedis:
         self._keys[key] = str(val)
         return val
 
+    async def incrby(self, key: str, amount: int = 1):
+        val = int(self._keys.get(key, "0")) + int(amount)
+        self._keys[key] = str(val)
+        return val
+
     async def decr(self, key: str):
         val = int(self._keys.get(key, "0")) - 1
         self._keys[key] = str(val)
