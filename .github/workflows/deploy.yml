@@ -208,7 +208,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_FRONTEND }}:${{ github.sha }}
 
   # ----------------------------------------------------------------------
-  # Deploy to Hostinger VPS — SSH in, sync the compose file, run the
+  # Deploy to the production VPS — SSH in, sync the compose file, run the
   # selective deploy script. Restarts only the changed services.
   # ----------------------------------------------------------------------
   deploy:
@@ -230,7 +230,7 @@ jobs:
     environment: production
     concurrency:
       # Never two deploys at once to the same box.
-      group: hostinger-prod
+      group: prod-deploy
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -257,94 +257,107 @@ jobs:
 
       - name: Verify required secrets are set
         env:
-          HOSTINGER_SSH_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
-          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
-          HOSTINGER_SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY || secrets.HOSTINGER_SSH_KEY }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST || secrets.HOSTINGER_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER || secrets.HOSTINGER_SSH_USER }}
         run: |
           set -eu
           missing=""
-          [[ -z "${HOSTINGER_SSH_KEY:-}" ]] && missing="$missing HOSTINGER_SSH_KEY"
-          [[ -z "${HOSTINGER_SSH_HOST:-}" ]] && missing="$missing HOSTINGER_SSH_HOST"
-          [[ -z "${HOSTINGER_SSH_USER:-}" ]] && missing="$missing HOSTINGER_SSH_USER"
+          [[ -z "${DEPLOY_SSH_KEY:-}" ]] && missing="$missing DEPLOY_SSH_KEY"
+          [[ -z "${DEPLOY_SSH_HOST:-}" ]] && missing="$missing DEPLOY_SSH_HOST"
+          [[ -z "${DEPLOY_SSH_USER:-}" ]] && missing="$missing DEPLOY_SSH_USER"
           if [[ -n "$missing" ]]; then
             echo "Missing required secrets on the 'production' environment:$missing"
             echo "Configure at: Settings → Environments → production → Environment secrets"
             exit 1
           fi
-          echo "ssh key length: ${#HOSTINGER_SSH_KEY} bytes"
-          echo "host: $HOSTINGER_SSH_HOST   user: $HOSTINGER_SSH_USER"
+          echo "ssh key length: ${#DEPLOY_SSH_KEY} bytes"
+          echo "host: $DEPLOY_SSH_HOST   user: $DEPLOY_SSH_USER"
 
       - name: Install SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY || secrets.HOSTINGER_SSH_KEY }}
 
       - name: Trust VPS host key
         env:
-          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST || secrets.HOSTINGER_SSH_HOST }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
         run: |
           set -eu
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          # Pinned host keys, captured 2026-06-03. Public values — SSH host
-          # keys are designed to be published (cf. github.com/github/known-hosts).
-          # Embedded here instead of fetched via ssh-keyscan to avoid the
-          # Hostinger rate-limit that periodically blocks GitHub runner IPs
-          # for longer than any reasonable retry window. To rotate after a
-          # VPS rebuild: ssh-keyscan -t rsa,ecdsa,ed25519 <host>, paste here.
-          {
-            echo "${HOSTINGER_SSH_HOST} ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPZyygdybAyYpQcbf8jMh3KhAJOQBOLAI1IqbjagjQZ+OyKTC9w+ZPE+bVlNNdvDjP82uAGKHlo/KUsKdGjF7A8="
-            echo "${HOSTINGER_SSH_HOST} ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDPTs9n4V9qP+k42n18tG/8PHPH+y/EmLRzyWl1I+2Ua5Y7FqV5xW1zZ9aO/d0IYC8QTwSZCuS6hlrPqfxDx+HeQEriauMPmkN/uHDPCkePbaInYjXJJKlGuuLvB4cXqRrsvlC10tF8ltF6F1aSFO+8VemCqJhPtDH6JJ8wvCFNvhCH1SEf6l7VcTOFvdFWSVGv4bwoTYU+W5oz6ewgjdDUYFCn2RpZzbVuakMb7z6XL2eYCQo/Pf1C3sV9J1QKKYPU4KOq2LbgiuvP6JUwWX8tCeDIszVQbF2MQ9bGAmDFsukGkWSMlNPk8tuYBep+74zoCcxOhKXJoCneIKZTsgzxXcGYHtRA5q0FlwkCApGXLJkgwiYjH5o+e2Et+Yew8EoWmmqCTK05GFAsxGQ4g7QIxdPo6cmKA1+zqJD+/Yo8njVb7qCVROPggMrs2geslvpTnH7gxChTVVIiyxngx6GB3jm8n5pBf1fSUbPB6xBzM5mP1yUao4r1LhAhdlM9TBs="
-            echo "${HOSTINGER_SSH_HOST} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM2x8FqOsJqEhk+O9ieKHnJknPZey7/8mMp3CSeIAkMG"
-          } > ~/.ssh/known_hosts
+          # Host keys are PINNED rather than fetched with ssh-keyscan at deploy
+          # time. keyscan is trust-on-first-use, so a MITM during the first
+          # deploy after a rebuild would be accepted silently; pinning also
+          # survives providers that rate-limit GitHub runner IPs (Hostinger did,
+          # for longer than any reasonable retry window).
+          #
+          # Supply them in the DEPLOY_SSH_KNOWN_HOSTS secret — one
+          # "<host> <type> <base64>" line per key — so rotating a rebuilt or
+          # migrated VPS is a secret change, not a code change. Capture with:
+          #   ssh-keyscan -t rsa,ecdsa,ed25519 <host>
+          # These are public values by design (cf. github.com/github/known-hosts).
+          if [[ -n "${KNOWN_HOSTS:-}" ]]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+            echo "host keys pinned from DEPLOY_SSH_KNOWN_HOSTS ($(grep -c . ~/.ssh/known_hosts) entries)"
+          else
+            # Fallback: original Hostinger keys, captured 2026-06-03. Delete this
+            # branch once DEPLOY_SSH_KNOWN_HOSTS is set for the new host.
+            {
+            echo "${DEPLOY_SSH_HOST} ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPZyygdybAyYpQcbf8jMh3KhAJOQBOLAI1IqbjagjQZ+OyKTC9w+ZPE+bVlNNdvDjP82uAGKHlo/KUsKdGjF7A8="
+            echo "${DEPLOY_SSH_HOST} ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDPTs9n4V9qP+k42n18tG/8PHPH+y/EmLRzyWl1I+2Ua5Y7FqV5xW1zZ9aO/d0IYC8QTwSZCuS6hlrPqfxDx+HeQEriauMPmkN/uHDPCkePbaInYjXJJKlGuuLvB4cXqRrsvlC10tF8ltF6F1aSFO+8VemCqJhPtDH6JJ8wvCFNvhCH1SEf6l7VcTOFvdFWSVGv4bwoTYU+W5oz6ewgjdDUYFCn2RpZzbVuakMb7z6XL2eYCQo/Pf1C3sV9J1QKKYPU4KOq2LbgiuvP6JUwWX8tCeDIszVQbF2MQ9bGAmDFsukGkWSMlNPk8tuYBep+74zoCcxOhKXJoCneIKZTsgzxXcGYHtRA5q0FlwkCApGXLJkgwiYjH5o+e2Et+Yew8EoWmmqCTK05GFAsxGQ4g7QIxdPo6cmKA1+zqJD+/Yo8njVb7qCVROPggMrs2geslvpTnH7gxChTVVIiyxngx6GB3jm8n5pBf1fSUbPB6xBzM5mP1yUao4r1LhAhdlM9TBs="
+            echo "${DEPLOY_SSH_HOST} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM2x8FqOsJqEhk+O9ieKHnJknPZey7/8mMp3CSeIAkMG"
+            } > ~/.ssh/known_hosts
+            echo "host keys pinned from workflow fallback (3 entries)"
+          fi
           chmod 600 ~/.ssh/known_hosts
-          echo "host keys pinned from workflow (3 entries)"
 
       - name: Sync compose file + deploy script to VPS
         env:
-          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
-          HOSTINGER_SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
-          HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
-          DEPLOY_DIR: ${{ secrets.HOSTINGER_DEPLOY_DIR }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST || secrets.HOSTINGER_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER || secrets.HOSTINGER_SSH_USER }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT || secrets.HOSTINGER_SSH_PORT }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_REMOTE_DIR || secrets.HOSTINGER_DEPLOY_DIR }}
         run: |
           set -eu
-          port="${HOSTINGER_SSH_PORT:-22}"
+          port="${DEPLOY_SSH_PORT:-22}"
           deploy_dir="${DEPLOY_DIR:-/opt/trading_gang}"
-          ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
+          ssh -p "$port" "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" \
             "mkdir -p $deploy_dir/deploy/nginx"
           scp -P "$port" \
             docker-compose.prod.yml \
             scripts/deploy-remote.sh \
-            "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST:$deploy_dir/"
+            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST:$deploy_dir/"
           scp -P "$port" \
             deploy/nginx/prod.conf \
-            "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST:$deploy_dir/deploy/nginx/"
-          ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
+            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST:$deploy_dir/deploy/nginx/"
+          ssh -p "$port" "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" \
             "chmod +x $deploy_dir/deploy-remote.sh"
 
       - name: Run selective deploy on VPS
         env:
-          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
-          HOSTINGER_SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
-          HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
-          DEPLOY_DIR: ${{ secrets.HOSTINGER_DEPLOY_DIR }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST || secrets.HOSTINGER_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER || secrets.HOSTINGER_SSH_USER }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT || secrets.HOSTINGER_SSH_PORT }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_REMOTE_DIR || secrets.HOSTINGER_DEPLOY_DIR }}
           SERVICES: ${{ steps.scope.outputs.services }}
           SHA: ${{ github.sha }}
         run: |
           set -eu
-          port="${HOSTINGER_SSH_PORT:-22}"
+          port="${DEPLOY_SSH_PORT:-22}"
           deploy_dir="${DEPLOY_DIR:-/opt/trading_gang}"
-          ssh -p "$port" "$HOSTINGER_SSH_USER@$HOSTINGER_SSH_HOST" \
+          ssh -p "$port" "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" \
             "cd $deploy_dir && DEPLOY_DIR=$deploy_dir ./deploy-remote.sh $SHA $SHA $SERVICES"
 
       - name: Health probe
         env:
-          HEALTH_URL: ${{ secrets.HOSTINGER_HEALTH_URL }}
+          HEALTH_URL: ${{ secrets.DEPLOY_HEALTH_URL || secrets.HOSTINGER_HEALTH_URL }}
         run: |
           set -eu
           url="${HEALTH_URL:-}"
           if [[ -z "$url" ]]; then
-            echo "HOSTINGER_HEALTH_URL not set — skipping post-deploy probe"
+            echo "DEPLOY_HEALTH_URL not set — skipping post-deploy probe"
             exit 0
           fi
           echo "waiting 30s for containers to start..."
