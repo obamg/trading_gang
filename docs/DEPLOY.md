@@ -1,8 +1,8 @@
-# Hostinger VPS deployment
+# VPS deployment
 
 Every push to `main` triggers `.github/workflows/deploy.yml`. The workflow
 detects which paths changed and deploys **only** the affected services to the
-Hostinger VPS. Unchanged services are left running — no rebuild, no restart,
+production VPS. Unchanged services are left running — no rebuild, no restart,
 no downtime.
 
 ## Change → deploy mapping
@@ -27,16 +27,24 @@ Then add these **secrets** to that environment:
 
 | Secret                     | What it is                                                              |
 | -------------------------- | ----------------------------------------------------------------------- |
-| `HOSTINGER_SSH_HOST`       | VPS IP or hostname (e.g. `203.0.113.42`)                                |
-| `HOSTINGER_SSH_PORT`       | SSH port — omit if using default `22`                                   |
-| `HOSTINGER_SSH_USER`       | Deploy user, e.g. `deploy` or `root`                                    |
-| `HOSTINGER_SSH_KEY`        | Full private key (OpenSSH format, no passphrase) matching the VPS user  |
-| `HOSTINGER_DEPLOY_DIR`     | Absolute path on VPS, e.g. `/opt/tradecore` (default if unset)          |
-| `HOSTINGER_HEALTH_URL`     | Optional: public URL of `/api/health` for a post-deploy smoke test      |
+| `DEPLOY_SSH_HOST`          | VPS IP or hostname (e.g. `203.0.113.42`)                                |
+| `DEPLOY_SSH_PORT`          | SSH port — omit if using default `22`                                   |
+| `DEPLOY_SSH_USER`          | Deploy user, e.g. `deploy` or `root`                                    |
+| `DEPLOY_SSH_KEY`           | Full private key (OpenSSH format, no passphrase) matching the VPS user  |
+| `DEPLOY_SSH_KNOWN_HOSTS`   | Pinned host keys, one per line: `ssh-keyscan -t rsa,ecdsa,ed25519 <host>` |
+| `DEPLOY_REMOTE_DIR`        | Absolute path on VPS, e.g. `/opt/tradecore` (default `/opt/trading_gang`) |
+| `DEPLOY_HEALTH_URL`        | Optional: public URL of `/api/health` for a post-deploy smoke test      |
+
+The workflow falls back to the older `HOSTINGER_*` names when a `DEPLOY_*`
+secret is unset, so both can coexist during a provider migration. Drop the
+`HOSTINGER_*` secrets once the `DEPLOY_*` ones are in place.
+
+`DEPLOY_SSH_KNOWN_HOSTS` is what makes a VPS rebuild or a provider move a
+secret change instead of a code change — see [VPS_MIGRATION.md](VPS_MIGRATION.md).
 
 ## One-time VPS bootstrap
 
-Run these once on the Hostinger VPS (SSH in as root or a sudoer):
+Run these once on the VPS (SSH in as root or a sudoer):
 
 ```bash
 # 1. Install docker + compose v2
