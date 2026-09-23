@@ -107,6 +107,18 @@ services:
       AWAKENING_ENABLED: ${AWAKENING_ENABLED:-false}
       WAVEWATCH_ENABLED: ${WAVEWATCH_ENABLED:-false}
       MAJORSBOT_ENABLED: ${MAJORSBOT_ENABLED:-true}
+      # Disabled 2026-09-23: FAILED its pre-committed gate. At n=58 closed
+      # trades — nearly 2x the n>=30 gate — volevent averaged -0.0887 net R
+      # against the bake-off's +0.151R (cumulative -5.14R, -$268). Mechanism is
+      # winner MAGNITUDE, not hit rate: trail exits pay +0.760R avg where the
+      # backtest needed ~+1.3R, stops run -1.061R on gap/fee slippage, and win
+      # rate 44.8% vs 49.7% is only a minor miss. The shortfall vs backtest is
+      # NOT statistically conclusive (t=-1.70, p~0.09) — but the gate was "beat
+      # the backtest average at n>=30", not "be significantly worse". Reaching
+      # for the t-stat after seeing the result is exactly the
+      # retune-instead-of-disable move the pre-commitment exists to prevent.
+      # Re-enable only behind a fresh honest bake-off of a CHANGED strategy.
+      MAJORSBOT_VOLEVENT_ENABLED: ${MAJORSBOT_VOLEVENT_ENABLED:-false}
       # Disabled 2026-07-31: funding_percentile() tie/cap bug fires false shorts
       # on Bybit's 0.01% funding ceiling (see git history). Re-enable only after
       # a corrected, freshly bake-off-validated funding-fade.
@@ -178,6 +190,18 @@ services:
       AWAKENING_ENABLED: ${AWAKENING_ENABLED:-false}
       WAVEWATCH_ENABLED: ${WAVEWATCH_ENABLED:-false}
       MAJORSBOT_ENABLED: ${MAJORSBOT_ENABLED:-true}
+      # Disabled 2026-09-23: FAILED its pre-committed gate. At n=58 closed
+      # trades — nearly 2x the n>=30 gate — volevent averaged -0.0887 net R
+      # against the bake-off's +0.151R (cumulative -5.14R, -$268). Mechanism is
+      # winner MAGNITUDE, not hit rate: trail exits pay +0.760R avg where the
+      # backtest needed ~+1.3R, stops run -1.061R on gap/fee slippage, and win
+      # rate 44.8% vs 49.7% is only a minor miss. The shortfall vs backtest is
+      # NOT statistically conclusive (t=-1.70, p~0.09) — but the gate was "beat
+      # the backtest average at n>=30", not "be significantly worse". Reaching
+      # for the t-stat after seeing the result is exactly the
+      # retune-instead-of-disable move the pre-commitment exists to prevent.
+      # Re-enable only behind a fresh honest bake-off of a CHANGED strategy.
+      MAJORSBOT_VOLEVENT_ENABLED: ${MAJORSBOT_VOLEVENT_ENABLED:-false}
       # Disabled 2026-07-31: funding_percentile() tie/cap bug fires false shorts
       # on Bybit's 0.01% funding ceiling (see git history). Re-enable only after
       # a corrected, freshly bake-off-validated funding-fade.
