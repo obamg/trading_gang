@@ -49,8 +49,29 @@ PRO_FEATURES = {
 ELITE_FEATURES = {**PRO_FEATURES, "oracle_auto_execute": True}
 
 
+def _plans_table_exists(conn) -> bool:
+    """Does `plans` exist right now?
+
+    It does NOT on a fresh database. 001 builds the schema from
+    `Base.metadata.create_all`, and the Plan/Subscription/Invoice models were
+    deleted from app/models/ when billing was dropped — so 001 stopped
+    creating the billing tables while this migration kept inserting into one.
+    That made `alembic upgrade head` fail here on every NEW environment
+    (relation "plans" does not exist), even though databases migrated before
+    the models were deleted sail through, which is why it went unnoticed.
+
+    Skipping is safe rather than lossy: 003_drop_billing drops `plans` one
+    step later, and no application code reads it.
+    """
+    return conn.exec_driver_sql(
+        "SELECT to_regclass('public.plans')"
+    ).scalar() is not None
+
+
 def upgrade() -> None:
     conn = op.get_bind()
+    if not _plans_table_exists(conn):
+        return
     conn.exec_driver_sql(
         """
         INSERT INTO plans (name, display_name, price_monthly_usd, price_yearly_usd,
@@ -70,4 +91,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DELETE FROM plans WHERE name IN ('free', 'pro', 'elite');")
+    conn = op.get_bind()
+    if not _plans_table_exists(conn):
+        return
+    conn.exec_driver_sql(
+        "DELETE FROM plans WHERE name IN ('free', 'pro', 'elite');"
+    )
