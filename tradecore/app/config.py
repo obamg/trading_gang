@@ -88,6 +88,12 @@ class Settings(BaseSettings):
 
     # Analysis modules (Team 5)
     coingecko_api_key: str = ""
+    # CoinMarketCap. Empty = every CMC call short-circuits to None and each
+    # caller keeps its previous source, so unset is a safe default. The free
+    # "Basic" plan issues a key with 15k credits/month — see
+    # app/services/cmc_client.py for the credit accounting and the
+    # cmc_not_entitled log event that reveals per-endpoint plan gating.
+    cmc_api_key: str = ""
     trading_economics_api_key: str = ""
     santiment_api_key: str = ""
     # Santiment plan time restriction. SANAPI FREE only serves data older than

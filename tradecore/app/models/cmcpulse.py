@@ -32,6 +32,20 @@ class TradeContextSnapshot(Base):
     trending_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # CMC's 24h price change % for the coin at entry (only when trending).
     trending_change_24h: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    # Three MORE crowding populations, each distinct from search-trending
+    # above: browsing attention, price-move leaderboard, and social chatter.
+    # A symbol can be hot in one and absent from the others, which is exactly
+    # what makes them worth recording separately — at the gate we can ask
+    # which KIND of attention (if any) marks a worse entry, instead of
+    # collapsing them into one "was it hot" flag that cannot be decomposed.
+    # NULL means "not in that list", never "not collected".
+    most_visited_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gainers_losers_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    community_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Regime, not crowding: the whole-market backdrop at entry. Lets the gate
+    # separate "the strategy is bad" from "we only traded one regime".
+    btc_dominance_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    total_mcap_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = created_at_col()
 

@@ -49,7 +49,7 @@ import httpx
 
 from app.config import settings
 from app.logging_config import log
-from app.services import redis_service
+from app.services import cmc_client, redis_service
 
 TICKERS_KEY = "newspulse:tickers"
 NAMES_KEY = "newspulse:coin_names"
@@ -215,6 +215,27 @@ def legacy_coin_map() -> CoinMap:
 
 # --- refresh --------------------------------------------------------------
 
+async def _fetch_cmc_names() -> dict[str, tuple[str, int]]:
+    """Top coins by market cap from CMC. Same shape as the CoinGecko path.
+
+    ``cmc_rank`` and CoinGecko's ``market_cap_rank`` are both 1-based
+    market-cap rank, so AMBIGUOUS_MAX_RANK keeps its meaning whichever
+    source filled the map. One call covers what took CG_PAGES requests.
+    """
+    rows = await cmc_client.listings_latest(limit=CG_PAGES * CG_PER_PAGE)
+    if not rows:
+        return {}
+    names: dict[str, tuple[str, int]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = (row.get("name") or "").strip()
+        symbol = (row.get("symbol") or "").strip().upper()
+        if name and symbol:
+            names[name] = (symbol, row.get("cmc_rank") or 9999)
+    return names
+
+
 async def _fetch_coingecko_names() -> dict[str, tuple[str, int]]:
     headers = {}
     cg_key = getattr(settings, "coingecko_api_key", "") or ""
@@ -269,7 +290,10 @@ async def refresh_universe() -> tuple[int, int]:
     """
     r = redis_service.get_redis()
     tickers = await _fetch_exchange_tickers()
-    names = await _fetch_coingecko_names()
+    # CMC first (one call, contractual quota), CoinGecko as the fallback.
+    names = await _fetch_cmc_names()
+    if not names:
+        names = await _fetch_coingecko_names()
 
     if tickers:
         await r.delete(TICKERS_KEY)

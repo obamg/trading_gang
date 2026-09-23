@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
 from app.models.sentiment import MarketSentimentSnapshot, SentimentSnapshot
-from app.services import redis_service
+from app.services import cmc_client, redis_service
 
 FUNDING_RATE_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"  # returns lastFundingRate per symbol
 LS_RATIO_URL = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
@@ -156,14 +156,29 @@ async def collect_market(db: AsyncSession) -> dict | None:
         except Exception as e:
             log.warning("fear_greed_failed", err=str(e))
 
+        # Global metrics: CMC first, CoinGecko as fallback. Both return
+        # dominance as a percent and total market cap in USD, so the units
+        # and the downstream rounding are identical either way.
         try:
-            r = await client.get(CG_GLOBAL_URL)
-            r.raise_for_status()
-            data = r.json().get("data") or {}
-            btc_dominance = float((data.get("market_cap_percentage") or {}).get("btc") or 0) or None
-            total_mcap = float((data.get("total_market_cap") or {}).get("usd") or 0) or None
-        except Exception as e:
-            log.warning("coingecko_global_failed", err=str(e))
+            cmc = await cmc_client.global_metrics()
+        except Exception as e:  # cmc_client soft-fails, but never trust that
+            cmc = None
+            log.warning("cmc_global_failed", err=str(e))
+        if cmc:
+            btc_dominance = float(cmc.get("btc_dominance") or 0) or None
+            total_mcap = float(
+                ((cmc.get("quote") or {}).get("USD") or {}).get("total_market_cap") or 0
+            ) or None
+
+        if btc_dominance is None and total_mcap is None:
+            try:
+                r = await client.get(CG_GLOBAL_URL)
+                r.raise_for_status()
+                data = r.json().get("data") or {}
+                btc_dominance = float((data.get("market_cap_percentage") or {}).get("btc") or 0) or None
+                total_mcap = float((data.get("total_market_cap") or {}).get("usd") or 0) or None
+            except Exception as e:
+                log.warning("coingecko_global_failed", err=str(e))
 
     stmt = pg_insert(MarketSentimentSnapshot).values(
         fear_greed_index=fg_index,
