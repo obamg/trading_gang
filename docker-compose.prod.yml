@@ -83,6 +83,14 @@ services:
       # source (CoinGecko / the keyless trending scrape). The free Basic
       # plan gives 15k credits/month; /cmcpulse/credits reports spend.
       CMC_API_KEY: ${CMC_API_KEY:-}
+      # Oracle -> Telegram alert gate. Defaults are deliberately quiet; tune from
+      # data (oracle_alert_suppressed logs + the alerted-vs-not comparison).
+      ORACLE_ALERT_MIN_CONFLUENCE: ${ORACLE_ALERT_MIN_CONFLUENCE:-2}
+      ORACLE_ALERT_MIN_ABS_SCORE: ${ORACLE_ALERT_MIN_ABS_SCORE:-20}
+      ORACLE_ALERT_PERCENTILE: ${ORACLE_ALERT_PERCENTILE:-0.97}
+      ORACLE_ALERT_MIN_SAMPLE: ${ORACLE_ALERT_MIN_SAMPLE:-100}
+      ORACLE_ALERT_COOLDOWN_MINUTES: ${ORACLE_ALERT_COOLDOWN_MINUTES:-120}
+      ORACLE_ALERT_DAILY_CAP: ${ORACLE_ALERT_DAILY_CAP:-12}
       SANTIMENT_API_KEY: ${SANTIMENT_API_KEY:-}
       # SANAPI FREE serves data >30d old and rejects a query whose `to` is past
       # that ceiling. Set to 0 on a paid plan to collect up to today.
@@ -158,6 +166,14 @@ services:
       # source (CoinGecko / the keyless trending scrape). The free Basic
       # plan gives 15k credits/month; /cmcpulse/credits reports spend.
       CMC_API_KEY: ${CMC_API_KEY:-}
+      # Oracle -> Telegram alert gate. Defaults are deliberately quiet; tune from
+      # data (oracle_alert_suppressed logs + the alerted-vs-not comparison).
+      ORACLE_ALERT_MIN_CONFLUENCE: ${ORACLE_ALERT_MIN_CONFLUENCE:-2}
+      ORACLE_ALERT_MIN_ABS_SCORE: ${ORACLE_ALERT_MIN_ABS_SCORE:-20}
+      ORACLE_ALERT_PERCENTILE: ${ORACLE_ALERT_PERCENTILE:-0.97}
+      ORACLE_ALERT_MIN_SAMPLE: ${ORACLE_ALERT_MIN_SAMPLE:-100}
+      ORACLE_ALERT_COOLDOWN_MINUTES: ${ORACLE_ALERT_COOLDOWN_MINUTES:-120}
+      ORACLE_ALERT_DAILY_CAP: ${ORACLE_ALERT_DAILY_CAP:-12}
       SANTIMENT_API_KEY: ${SANTIMENT_API_KEY:-}
       # SANAPI FREE serves data >30d old and rejects a query whose `to` is past
       # that ceiling. Set to 0 on a paid plan to collect up to today.

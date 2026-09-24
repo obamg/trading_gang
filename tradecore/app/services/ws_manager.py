@@ -25,9 +25,12 @@ from app.services.telegram_service import service as telegram_service
 UNREAD_BUFFER_SIZE = 20
 ALERT_MODULES = ("radarx", "whaleradar", "gemradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch")
 
-# Modules whose alerts bypass the watchlist gate. Empty since the bots
-# were removed — every remaining module is watchlist-scoped.
-WATCHLIST_EXEMPT_MODULES: frozenset[str] = frozenset()
+# Modules whose alerts bypass the watchlist gate. Oracle is a DISCOVERY
+# signal — "which token, right now" — so scoping it to a watchlist the user
+# has not filled in yet (theirs is empty) would silence it entirely. Its noise
+# is bounded in the engine instead: rarity gate, confluence floor, per-symbol
+# cooldown and a daily cap.
+WATCHLIST_EXEMPT_MODULES: frozenset[str] = frozenset({"oracle"})
 
 
 class ConnectionManager:

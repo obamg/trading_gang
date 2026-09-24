@@ -411,12 +411,17 @@ class TelegramService:
             )
 
         if module == "oracle":
-            rec = (d.get("recommendation") or "").replace("_", " ").upper()
+            score = int(d.get("score") or 0)
+            arrow = "🟢 long bias" if score > 0 else "🔴 short bias" if score < 0 else "⚪ neutral"
+            mods = d.get("agreeing_modules") or []
+            why = ", ".join(mods) if mods else "no single input dominates"
             return (
-                f"🔮 *Oracle — {sym}*\n"
-                f"Score: `{d.get('score', '?')}` | `{rec}`\n"
-                f"Confluence: `{d.get('confluence_count', '?')}` modules\n"
-                f"Entry: `{d.get('entry_price', '-')}` | SL: `{d.get('stop_loss', '-')}` | TP: `{d.get('take_profit', '-')}`"
+                f"🔮 *Oracle — {sym}*  {arrow}\n"
+                f"Score `{score:+d}` from `{d.get('confluence_count', '?')}` agreeing inputs\n"
+                f"Why: {why}\n"
+                f"Entry `{d.get('entry_price', '-')}` · Stop `{d.get('stop_loss', '-')}` · Target `{d.get('take_profit', '-')}`\n"
+                f"_{d.get('alert_reason', '')}_\n"
+                f"_This is what the inputs agree on right now — not advice. /pause to mute for an hour._"
             )
 
         if module == "sentiment":

@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy.sql.expression import false as sa_false
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,6 +34,9 @@ class OracleSignal(Base):
     is_paper: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     timeframe: Mapped[str] = mapped_column(String(10), default="5m", server_default="5m")
     signal_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # True when this signal was pushed to Telegram. The evaluation compares
+    # alerted vs non-alerted outcomes; without the flag there is nothing to compare.
+    alerted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_false())
     created_at: Mapped[datetime] = created_at_col()
 
     __table_args__ = (
