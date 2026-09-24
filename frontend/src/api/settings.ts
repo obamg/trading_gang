@@ -25,9 +25,17 @@ export async function apiUpdateSettings(body: Partial<UserSettings>): Promise<Us
   return data;
 }
 
-export async function apiCreateTelegramToken(): Promise<string> {
-  const { data } = await http.post<{ token: string }>("/settings/telegram/link-token");
-  return data.token;
+export type TelegramLinkInfo = {
+  token: string;
+  /** One-tap `t.me` URL with the code already attached. Null when the bot
+   *  hasn't resolved its own username — fall back to showing `token`. */
+  deep_link: string | null;
+  expires_in_seconds: number;
+};
+
+export async function apiCreateTelegramToken(): Promise<TelegramLinkInfo> {
+  const { data } = await http.post<TelegramLinkInfo>("/settings/telegram/link-token");
+  return data;
 }
 
 export async function apiUnlinkTelegram(): Promise<void> {
