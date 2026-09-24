@@ -499,13 +499,3 @@ def test_ms_to_dt_accepts_int_and_string_and_rejects_junk():
 
 # --- cross-module contract ------------------------------------------------
 
-def test_every_announcement_source_is_registered_primary():
-    """newsevent gates its news leg on PRIMARY_SOURCES. A source added here but
-    not registered there is collected and then silently never traded."""
-    from app.modules.majorsbot import newsevent as ne
-
-    emitted = {
-        a.BINANCE_SOURCE, a.UPBIT_SOURCE, a.BITHUMB_SOURCE,
-        a.BYBIT_SOURCE, a.OKX_SOURCE, a.KUCOIN_SOURCE,
-    }
-    assert emitted <= set(ne.PRIMARY_SOURCES)

@@ -1,8 +1,8 @@
 """CMCPulse — regime/crowding context collection and per-trade stamping.
 
-The contract that matters most: this module is OBSERVATIONAL. It must never
-cost an entry (snapshot swallows everything) and nothing in the bots reads
-it to decide.
+CMCPulse is OBSERVATIONAL — it records regime and crowding, and nothing
+acts on it. The per-trade snapshot half was removed with the bots; what
+remains are the collectors and the read side.
 """
 from __future__ import annotations
 
@@ -163,62 +163,6 @@ async def test_get_context_all_null_when_redis_empty(monkeypatch, fake_redis):
     assert ctx == c._NULL_CONTEXT
     assert all(v is None for v in ctx.values())
     assert "fear_greed" in ctx and "trending_rank" in ctx
-
-
-# --- the stamp must never cost an entry -----------------------------------
-
-class _Trade:
-    id = "t1"
-    symbol = "XRPUSDT"
-    strategy = "newsevent"
-
-
-@pytest.mark.asyncio
-async def test_snapshot_swallows_db_failure(monkeypatch, fake_redis):
-    monkeypatch.setattr(c.redis_service, "get_redis", lambda: fake_redis)
-
-    class _BoomDB:
-        def add(self, row):
-            raise RuntimeError("db down")
-
-        async def rollback(self):
-            pass
-
-    # Must not raise — the entry that triggered it already exists.
-    await c.snapshot_trade_context(_BoomDB(), _Trade())
-
-
-@pytest.mark.asyncio
-async def test_snapshot_swallows_redis_failure(monkeypatch):
-    def boom():
-        raise RuntimeError("redis down")
-
-    monkeypatch.setattr(c.redis_service, "get_redis", boom)
-
-    class _DB:
-        def add(self, row):
-            self.row = row
-
-        async def commit(self):
-            pass
-
-    db = _DB()
-    # Redis down → context nulls → row still written with nulls, no raise.
-    await c.snapshot_trade_context(db, _Trade())
-    assert db.row.fear_greed is None
-    assert db.row.trade_id == "t1"
-
-
-def test_executor_hook_is_guarded():
-    """Both entry paths call the snapshot inside a try/except that also
-    covers the import — an entry must never be lost to context."""
-    import inspect
-
-    from app.modules.majorsbot import executor
-
-    src = inspect.getsource(executor)
-    assert src.count("snapshot_trade_context") == 2
-    assert src.count("trade_context_hook_failed") == 2
 
 
 # --- keyed CMC paths (B + C) ----------------------------------------------

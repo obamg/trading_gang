@@ -17,17 +17,12 @@ to make a decision:
   most-visited, gainers/losers, and community-trending. Key required. Each
   is a DIFFERENT population from search-trending, which is the point: at the
   gate we can ask which kind of attention (if any) predicts a worse entry.
-- ``snapshot_trade_context``: called by the executor when any MajorsBot
-  trade opens; stamps the current Redis context onto a
-  ``trade_context_snapshots`` row. Reads Redis only — never HTTP — and
-  swallows everything: a missing snapshot must never cost an entry.
+Read the current picture with ``get_context()`` or ``GET /cmcpulse/context``.
 
-Why this exists: the newsevent forward test runs with frozen dials ("on
-attend"). These columns turn the waiting period into the dataset for the
-next iteration — at the gate we can test "do entries during Greed do worse?"
-and "was the symbol already trending when we entered?" on contemporaneous
-data instead of reconstruction. Trade 1 (XRP, −9.1R) was almost certainly
-top-of-trending at entry; from now on that is a recorded fact, not a guess.
+The per-trade snapshot half of this module was removed with the bots — it
+stamped regime context onto MajorsBot entries, and there are no entries now.
+The collectors stand alone: they are the only source of Fear & Greed, CMC
+search-trending and whole-market regime in the app.
 
 On the keyed endpoints: which of them the free Basic plan actually covers is
 UNVERIFIED. ``cmc_client`` marks a 403'd path dead for a day and logs
@@ -52,7 +47,6 @@ from decimal import Decimal
 import httpx
 
 from app.logging_config import log
-from app.models.cmcpulse import TradeContextSnapshot
 from app.services import cmc_client, redis_service
 
 FEAR_GREED_URL = "https://pro-api.coinmarketcap.com/public-api/v3/fear-and-greed/latest"
@@ -319,47 +313,6 @@ async def get_context(symbol: str | None = None) -> dict:
     except Exception as e:
         log.warning("cmcpulse_context_read_failed", err=str(e))
     return out
-
-
-async def snapshot_trade_context(db, trade) -> None:
-    """Stamp current context onto one just-opened trade. Never raises —
-    context is a bonus, an entry must not fail for lack of it."""
-    try:
-        ctx = await get_context(trade.symbol)
-        db.add(TradeContextSnapshot(
-            trade_id=trade.id,
-            symbol=trade.symbol,
-            strategy=trade.strategy,
-            fear_greed=ctx["fear_greed"],
-            fear_greed_class=ctx["fear_greed_class"],
-            trending_rank=ctx["trending_rank"],
-            trending_change_24h=ctx["trending_change_24h"],
-            most_visited_rank=ctx["most_visited_rank"],
-            gainers_losers_rank=ctx["gainers_losers_rank"],
-            community_rank=ctx["community_rank"],
-            btc_dominance_pct=ctx["btc_dominance_pct"],
-            total_mcap_usd=ctx["total_mcap_usd"],
-            captured_at=datetime.now(timezone.utc),
-        ))
-        await db.commit()
-        log.info(
-            "cmcpulse_trade_context_captured",
-            trade_id=str(trade.id),
-            symbol=trade.symbol,
-            fear_greed=ctx["fear_greed"],
-            trending_rank=ctx["trending_rank"],
-            most_visited_rank=ctx["most_visited_rank"],
-            gainers_losers_rank=ctx["gainers_losers_rank"],
-            community_rank=ctx["community_rank"],
-        )
-    except Exception as e:
-        try:
-            await db.rollback()
-        except Exception:
-            pass
-        log.warning(
-            "cmcpulse_trade_context_failed", trade_id=str(getattr(trade, "id", "?")), err=str(e)
-        )
 
 
 # ---------- scheduler wrappers ----------

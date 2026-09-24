@@ -12,7 +12,7 @@ from app.scripts.bootstrap_db import classify
 
 def test_versioned_database_upgrades():
     """The prod path: an alembic_version row means apply new revisions."""
-    assert classify({"alembic_version", "users", "majorsbot_trades"}) == "versioned"
+    assert classify({"alembic_version", "users", "wallet_swaps"}) == "versioned"
 
 
 def test_empty_database_gets_create_all():

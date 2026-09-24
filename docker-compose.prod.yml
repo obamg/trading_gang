@@ -106,44 +106,6 @@ services:
       LISTINGWATCH_ENABLED: ${LISTINGWATCH_ENABLED:-false}
       AWAKENING_ENABLED: ${AWAKENING_ENABLED:-false}
       WAVEWATCH_ENABLED: ${WAVEWATCH_ENABLED:-false}
-      MAJORSBOT_ENABLED: ${MAJORSBOT_ENABLED:-true}
-      # Disabled 2026-09-23: FAILED its pre-committed gate. At n=58 closed
-      # trades — nearly 2x the n>=30 gate — volevent averaged -0.0887 net R
-      # against the bake-off's +0.151R (cumulative -5.14R, -$268). Mechanism is
-      # winner MAGNITUDE, not hit rate: trail exits pay +0.760R avg where the
-      # backtest needed ~+1.3R, stops run -1.061R on gap/fee slippage, and win
-      # rate 44.8% vs 49.7% is only a minor miss. The shortfall vs backtest is
-      # NOT statistically conclusive (t=-1.70, p~0.09) — but the gate was "beat
-      # the backtest average at n>=30", not "be significantly worse". Reaching
-      # for the t-stat after seeing the result is exactly the
-      # retune-instead-of-disable move the pre-commitment exists to prevent.
-      # Re-enable only behind a fresh honest bake-off of a CHANGED strategy.
-      MAJORSBOT_VOLEVENT_ENABLED: ${MAJORSBOT_VOLEVENT_ENABLED:-false}
-      # Disabled 2026-07-31: funding_percentile() tie/cap bug fires false shorts
-      # on Bybit's 0.01% funding ceiling (see git history). Re-enable only after
-      # a corrected, freshly bake-off-validated funding-fade.
-      MAJORSBOT_FUNDINGFADE_ENABLED: ${MAJORSBOT_FUNDINGFADE_ENABLED:-false}
-      # Sizing raised 2026-08-13 (was 0.0025 risk / 0.05 cap). The 5% notional
-      # cap bound on EVERY trade, throttling real risk to ~$8.56 vs the $24.86
-      # the 0.25% setting intended. Now 1% risk with a 50% cap so the
-      # risk-based leg binds. Max heat = 6 concurrent × 1% = 6% of equity.
-      # R-multiples are risk-normalized, so this does NOT affect the n≥30 gate.
-      MAJORSBOT_RISK_PER_TRADE_PCT: ${MAJORSBOT_RISK_PER_TRADE_PCT:-0.01}
-      MAJORSBOT_POSITION_SIZE_PCT: ${MAJORSBOT_POSITION_SIZE_PCT:-0.5}
-      # newsevent (2026-08-20): two-leg news + volume confirmation, 15-min
-      # window, either order. NOT backtested — forward test only, gate n>=30
-      # on net R. Stops are OFF by request, so liquidation is the exit and is
-      # modelled explicitly.
-      MAJORSBOT_NEWSEVENT_ENABLED: ${MAJORSBOT_NEWSEVENT_ENABLED:-true}
-      MAJORSBOT_NEWSEVENT_STOP_ENABLED: ${MAJORSBOT_NEWSEVENT_STOP_ENABLED:-false}
-      # 10x notional. Measured on 533 real volume-leg events: 4.7% of entries
-      # hit liquidation (9.5% adverse move) within the 6h hold, each costing
-      # ~95% of equity => ~24% chance of reaching n=30 without one.
-      MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT: ${MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT:-5}
-      # Must be 1: notional = 10x equity means margin = the whole account, so
-      # a second concurrent position is not fundable. Paper does not enforce
-      # margin, so a higher value would silently simulate the impossible.
-      MAJORSBOT_NEWSEVENT_MAX_CONCURRENT: ${MAJORSBOT_NEWSEVENT_MAX_CONCURRENT:-1}
       SCHEDULER_ENABLED: "false"
       RUN_MIGRATIONS: "1"
       RUN_SEED: "0"
@@ -189,44 +151,6 @@ services:
       LISTINGWATCH_ENABLED: ${LISTINGWATCH_ENABLED:-false}
       AWAKENING_ENABLED: ${AWAKENING_ENABLED:-false}
       WAVEWATCH_ENABLED: ${WAVEWATCH_ENABLED:-false}
-      MAJORSBOT_ENABLED: ${MAJORSBOT_ENABLED:-true}
-      # Disabled 2026-09-23: FAILED its pre-committed gate. At n=58 closed
-      # trades — nearly 2x the n>=30 gate — volevent averaged -0.0887 net R
-      # against the bake-off's +0.151R (cumulative -5.14R, -$268). Mechanism is
-      # winner MAGNITUDE, not hit rate: trail exits pay +0.760R avg where the
-      # backtest needed ~+1.3R, stops run -1.061R on gap/fee slippage, and win
-      # rate 44.8% vs 49.7% is only a minor miss. The shortfall vs backtest is
-      # NOT statistically conclusive (t=-1.70, p~0.09) — but the gate was "beat
-      # the backtest average at n>=30", not "be significantly worse". Reaching
-      # for the t-stat after seeing the result is exactly the
-      # retune-instead-of-disable move the pre-commitment exists to prevent.
-      # Re-enable only behind a fresh honest bake-off of a CHANGED strategy.
-      MAJORSBOT_VOLEVENT_ENABLED: ${MAJORSBOT_VOLEVENT_ENABLED:-false}
-      # Disabled 2026-07-31: funding_percentile() tie/cap bug fires false shorts
-      # on Bybit's 0.01% funding ceiling (see git history). Re-enable only after
-      # a corrected, freshly bake-off-validated funding-fade.
-      MAJORSBOT_FUNDINGFADE_ENABLED: ${MAJORSBOT_FUNDINGFADE_ENABLED:-false}
-      # Sizing raised 2026-08-13 (was 0.0025 risk / 0.05 cap). The 5% notional
-      # cap bound on EVERY trade, throttling real risk to ~$8.56 vs the $24.86
-      # the 0.25% setting intended. Now 1% risk with a 50% cap so the
-      # risk-based leg binds. Max heat = 6 concurrent × 1% = 6% of equity.
-      # R-multiples are risk-normalized, so this does NOT affect the n≥30 gate.
-      MAJORSBOT_RISK_PER_TRADE_PCT: ${MAJORSBOT_RISK_PER_TRADE_PCT:-0.01}
-      MAJORSBOT_POSITION_SIZE_PCT: ${MAJORSBOT_POSITION_SIZE_PCT:-0.5}
-      # newsevent (2026-08-20): two-leg news + volume confirmation, 15-min
-      # window, either order. NOT backtested — forward test only, gate n>=30
-      # on net R. Stops are OFF by request, so liquidation is the exit and is
-      # modelled explicitly.
-      MAJORSBOT_NEWSEVENT_ENABLED: ${MAJORSBOT_NEWSEVENT_ENABLED:-true}
-      MAJORSBOT_NEWSEVENT_STOP_ENABLED: ${MAJORSBOT_NEWSEVENT_STOP_ENABLED:-false}
-      # 10x notional. Measured on 533 real volume-leg events: 4.7% of entries
-      # hit liquidation (9.5% adverse move) within the 6h hold, each costing
-      # ~95% of equity => ~24% chance of reaching n=30 without one.
-      MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT: ${MAJORSBOT_NEWSEVENT_POSITION_SIZE_PCT:-5}
-      # Must be 1: notional = 10x equity means margin = the whole account, so
-      # a second concurrent position is not fundable. Paper does not enforce
-      # margin, so a higher value would silently simulate the impossible.
-      MAJORSBOT_NEWSEVENT_MAX_CONCURRENT: ${MAJORSBOT_NEWSEVENT_MAX_CONCURRENT:-1}
       SCHEDULER_ENABLED: "true"
       WHALE_ALERT_API_KEY: ${WHALE_ALERT_API_KEY:-}
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}

@@ -30,8 +30,6 @@ from app.modules.walletwatch import detector as walletwatch_detector
 from app.modules.walletwatch import pruner as walletwatch_pruner
 from app.modules.walletwatch.discovery import engine as discovery_engine
 from app.modules.walletwatch.discovery import promote as discovery_promote
-from app.modules.majorsbot import engine as majorsbot_engine
-from app.modules.majorsbot import newsevent as majorsbot_newsevent
 from app.modules.listingwatch import detector as listingwatch_detector
 from app.modules.listingwatch import watcher as listingwatch_watcher
 from app.modules.awakening import detector as awakening_detector
@@ -326,27 +324,6 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         hours=1,
         id="discovery_auto_promote",
-        coalesce=True,
-        max_instances=1,
-    )
-    # MajorsBot — fixed-universe 1h-bar paper bot. The tick itself gates on
-    # majorsbot_enabled and swallows per-symbol + top-level exceptions.
-    sched.add_job(
-        majorsbot_engine.run_majorsbot_tick,
-        "interval",
-        minutes=5,
-        id="majorsbot_tick",
-        coalesce=True,
-        max_instances=1,
-    )
-    # newsevent pairs a 5m volume spike with a news leg inside 15 minutes, so
-    # it ticks far faster than the 1h-bar strategies. Self-gated on
-    # MAJORSBOT_NEWSEVENT_ENABLED (off by default).
-    sched.add_job(
-        majorsbot_newsevent.run_newsevent_job,
-        "interval",
-        minutes=1,
-        id="majorsbot_newsevent",
         coalesce=True,
         max_instances=1,
     )
