@@ -185,3 +185,31 @@ def test_confidence_mapping():
     assert _confidence(4) == "medium"
     assert _confidence(5) == "high"
     assert _confidence(6) == "high"
+
+
+# ---------- regression: the candle-key bug that kept Oracle at zero signals ----------
+
+def test_atr_works_on_real_stream_candles():
+    """The streams write h/l/c, not high/low/close. Before the fix this
+    returned 0.0 for every real candle, so every ATR-based stop/TP was
+    degenerate. The long-key ATR tests above passed only because their
+    fixtures used the legacy spelling that production never produced."""
+    candles = [  # newest first, Bybit shape
+        {"o": 100.0, "h": 110.0, "l": 95.0, "c": 105.0, "v": 1.0},
+        {"o": 98.0, "h": 104.0, "l": 96.0, "c": 100.0, "v": 1.0},
+        {"o": 97.0, "h": 108.0, "l": 92.0, "c": 98.0, "v": 1.0},
+    ]
+    assert _atr_from_candles(candles, period=2) > 0
+
+
+def test_engine_has_no_single_spelling_candle_reads():
+    """Guard against the bug class, not just the instance: no direct
+    .get("close"/"high"/"low"/"open", 0) reads may exist in the engine or in
+    sentimentpulse — every candle field goes through redis_service.candle_*."""
+    import inspect
+    from app.modules.oracle import engine
+    from app.modules.sentimentpulse import collector
+    for mod in (engine, collector):
+        src = inspect.getsource(mod)
+        for key in ("close", "high", "low", "open"):
+            assert f'.get("{key}", 0)' not in src, f"{mod.__name__} still reads .get(\"{key}\", 0)"

@@ -54,7 +54,7 @@ async def _check_trade(db: AsyncSession, trade: Trade) -> bool:
     if not candle:
         return False
 
-    current_price = float(candle.get("c") or candle.get("close") or 0)
+    current_price = redis_service.candle_close(candle)
     if current_price <= 0:
         return False
 
