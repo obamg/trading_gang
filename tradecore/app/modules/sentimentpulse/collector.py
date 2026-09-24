@@ -92,7 +92,7 @@ async def collect_per_symbol(db: AsyncSession) -> int:
                 r.raise_for_status()
                 oi_contracts = float(r.json().get("openInterest") or 0)
                 latest = await redis_service.get_latest_candle(symbol)
-                price = float(latest.get("close", 0)) if latest else 0.0
+                price = redis_service.candle_close(latest)
                 oi_usd = oi_contracts * price
             except Exception as e:
                 log.debug("sentiment_oi_failed", symbol=symbol, err=str(e))

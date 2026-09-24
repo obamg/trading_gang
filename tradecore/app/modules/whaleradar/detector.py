@@ -125,7 +125,7 @@ async def scan_oi_surges(db: AsyncSession, symbols: list[str] | None = None) -> 
                 continue
 
             candle = await redis_service.get_latest_candle(symbol)
-            price = float(candle.get("c") or candle.get("close") or 0) if candle else 0.0
+            price = redis_service.candle_close(candle)
             oi_usd = oi_contracts * price
             prev = await redis_service.get_open_interest(symbol)
             await redis_service.set_open_interest(
@@ -383,7 +383,7 @@ async def scan_slow_oi_accumulation(symbols: list[str] | None = None) -> list[di
                 continue
 
             candle = await redis_service.get_latest_candle(symbol)
-            price = float(candle.get("c") or candle.get("close") or 0) if candle else 0.0
+            price = redis_service.candle_close(candle)
             if price <= 0 or oi_contracts <= 0:
                 continue
             oi_usd = oi_contracts * price

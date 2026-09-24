@@ -71,6 +71,52 @@ async def get_latest_candle(symbol: str) -> dict | None:
     return json.loads(raw) if raw else None
 
 
+# ---------- candle field access ----------
+#
+# The streams write compact keys — o/h/l/c/v (see bybit_stream, binance_stream)
+# — but a legacy long-key schema (open/high/low/close/volume) predates them and
+# still appears in fixtures and older code. Reading only ONE spelling silently
+# returns 0 for the other, and that exact mistake kept Oracle at zero signals
+# for its entire life: `latest.get("close", 0)` on a candle that only had "c"
+# made current_price 0.0 on every trigger, which generate_signal treated as
+# "no price" and discarded without logging. Every candle read goes through
+# these helpers so the schema question is answered in one place.
+
+def candle_field(candle: dict | None, short: str, long: str) -> float:
+    """Read one OHLCV field under either spelling; 0.0 if absent or unparsable."""
+    if not candle:
+        return 0.0
+    v = candle.get(short)
+    if v is None:
+        v = candle.get(long)
+    if v is None:
+        return 0.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def candle_open(candle: dict | None) -> float:
+    return candle_field(candle, "o", "open")
+
+
+def candle_high(candle: dict | None) -> float:
+    return candle_field(candle, "h", "high")
+
+
+def candle_low(candle: dict | None) -> float:
+    return candle_field(candle, "l", "low")
+
+
+def candle_close(candle: dict | None) -> float:
+    return candle_field(candle, "c", "close")
+
+
+def candle_volume(candle: dict | None) -> float:
+    return candle_field(candle, "v", "volume")
+
+
 async def get_candle_at(symbol: str, target_ts_ms: int, tolerance_ms: int = 300_000) -> dict | None:
     """Return the candle whose open_time is closest to *target_ts_ms*.
 

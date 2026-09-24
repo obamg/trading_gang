@@ -113,3 +113,40 @@ async def test_candle_buffer_trim(fake_redis):
 
     candles = await redis_service.get_candles("SOLUSDT", limit=100)
     assert len(candles) <= redis_service.CANDLE_MAX
+
+
+# ---------- candle field helpers ----------
+#
+# The streams write o/h/l/c/v; older code and fixtures used open/high/low/close.
+# Reading one spelling only returned 0 for the other and silently killed Oracle.
+
+def test_candle_close_reads_stream_schema():
+    from app.services.redis_service import candle_close
+    assert candle_close({"c": 84372.7, "h": 84407.9}) == 84372.7
+
+
+def test_candle_close_reads_legacy_schema():
+    from app.services.redis_service import candle_close
+    assert candle_close({"close": 60000.0}) == 60000.0
+
+
+def test_candle_helpers_prefer_short_key_when_both_present():
+    from app.services.redis_service import candle_close
+    assert candle_close({"c": 1.0, "close": 2.0}) == 1.0
+
+
+def test_candle_helpers_zero_on_none_missing_or_garbage():
+    from app.services.redis_service import candle_close, candle_high, candle_volume
+    assert candle_close(None) == 0.0
+    assert candle_close({}) == 0.0
+    assert candle_high({"h": "bad"}) == 0.0
+    assert candle_volume({"v": None, "volume": None}) == 0.0
+
+
+def test_all_five_fields_cover_both_schemas():
+    from app.services import redis_service as rs
+    stream = {"o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 9.0}
+    legacy = {"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 9.0}
+    for c in (stream, legacy):
+        assert (rs.candle_open(c), rs.candle_high(c), rs.candle_low(c),
+                rs.candle_close(c), rs.candle_volume(c)) == (1.0, 2.0, 0.5, 1.5, 9.0)

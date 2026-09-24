@@ -455,9 +455,9 @@ def _atr_from_candles(candles: list[dict], period: int = 14) -> float:
         c = candles[i]
         prev = candles[i + 1]
         try:
-            high = float(c.get("high", 0))
-            low = float(c.get("low", 0))
-            prev_close = float(prev.get("close", 0))
+            high = redis_service.candle_high(c)
+            low = redis_service.candle_low(c)
+            prev_close = redis_service.candle_close(prev)
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             if tr > 0:
                 trs.append(tr)
@@ -477,7 +477,7 @@ async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None
 
     # Current price: latest candle from Redis
     latest = await redis_service.get_latest_candle(sym)
-    current_price = float(latest.get("close", 0)) if latest else 0.0
+    current_price = redis_service.candle_close(latest)
 
     radarx = await _radarx_signal(db, sym)
     whale = await _whaleradar_signal(db, sym)
@@ -587,6 +587,9 @@ async def generate_signal(
 
     current_price = live["current_price"]
     if current_price <= 0:
+        # This was the silent path that discarded every trigger for months.
+        # Never again silent: if price lookup fails, say so.
+        log.warning("oracle_signal_no_price", symbol=sym)
         return None
 
     # Macro gate: suppress weak signals during unfavorable conditions
@@ -700,9 +703,9 @@ async def _compute_mfe_mae(symbol: str, signal_at: datetime, window_minutes: int
         if ct > end_ts:
             break
         if signal_price is None:
-            signal_price = float(c.get("o") or c.get("open") or 0)
-        h = float(c.get("h") or c.get("high") or 0)
-        l = float(c.get("l") or c.get("low") or 0)
+            signal_price = redis_service.candle_open(c)
+        h = redis_service.candle_high(c)
+        l = redis_service.candle_low(c)
         if h > high_max:
             high_max = h
         if l < low_min:
@@ -757,7 +760,7 @@ async def measure_outcomes() -> int:
                             candle = latest
                 if candle is None:
                     return
-                price = float(candle.get("c") or candle.get("close") or 0)
+                price = redis_service.candle_close(candle)
                 if price <= 0:
                     return
                 setattr(out, slot, Decimal(str(price)))

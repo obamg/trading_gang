@@ -98,18 +98,15 @@ def _candle_quote_volume(candle: dict) -> float:
             except (TypeError, ValueError):
                 pass
     try:
-        close = float(candle.get("c") or candle.get("close") or 0)
-        vol = float(candle.get("v") or candle.get("volume") or 0)
+        close = redis_service.candle_close(candle)
+        vol = redis_service.candle_volume(candle)
         return close * vol
     except (TypeError, ValueError):
         return 0.0
 
 
 def _candle_close(candle: dict) -> float:
-    try:
-        return float(candle.get("c") or candle.get("close") or 0)
-    except (TypeError, ValueError):
-        return 0.0
+    return redis_service.candle_close(candle)
 
 
 async def detect_symbol(
@@ -169,7 +166,7 @@ async def detect_symbol(
 
     price = _candle_close(current)
     # Price change over the baseline window
-    base_open = float(baseline[-1].get("o") or baseline[-1].get("open") or price) if baseline else price
+    base_open = (redis_service.candle_open(baseline[-1]) or price) if baseline else price
     price_change_pct = ((price - base_open) / base_open * 100) if base_open else 0.0
 
     close_time = current.get("T") or current.get("close_time") or 0
