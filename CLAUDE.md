@@ -40,7 +40,7 @@ Test login: `test@example.com` / `test1234`.
 
 The backend is organized as **module packages** under `tradecore/app/modules/`. Each module is a self-contained vertical (detector + router + sometimes a model file in `app/models/`):
 
-`radarx`, `whaleradar`, `liquidmap`, `sentimentpulse`, `macropulse`, `gemradar`, `riskcalc`, `performance`, `oracle`, `flowpulse`, `newspulse`, `positionmonitor`, `exchanges`, `listingwatch`, `awakening`, `wavewatch`, `walletwatch` (+ `walletwatch/discovery` sub-module for PnL-based wallet auto-discovery), `chainpulse`, `majorsbot`.
+`radarx`, `whaleradar`, `liquidmap`, `sentimentpulse`, `macropulse`, `gemradar`, `riskcalc`, `performance`, `oracle`, `flowpulse`, `newspulse`, `positionmonitor`, `exchanges`, `listingwatch`, `awakening`, `wavewatch`, `walletwatch` (+ `walletwatch/discovery` sub-module for PnL-based wallet auto-discovery), `chainpulse`.
 
 Each module typically exposes:
 - `router.py` — FastAPI router, mounted from `app/main.py`
@@ -55,18 +55,39 @@ One-liners for the modules a new contributor is most likely to touch:
 - `listingwatch` — diffs current exchange instrument lists to detect new listings; force-subscribes the bybit stream.
 - `walletwatch` — labeled-address DEX swap monitor across ETH/BSC/Arbitrum/Base/Solana.
 - `chainpulse` — daily Santiment on-chain macro snapshots (MVRV, NVT, exchange flows, active addresses) per asset, with a derived regime label. No-ops with a log line when `SANTIMENT_API_KEY` is unset.
-- `majorsbot` — the paper-trading bot. Fixed 10-symbol Bybit linear-perp universe; self-computes 1h signals (it does not consume other modules' alerts). See below.
 
-### MajorsBot — the trading bot
+### No trading bots
 
-`majorsbot` is the only trading bot (a prior `bot`/WaveBot module was retired in 2026-08; don't look for `app/modules/bot/`, `BOT_*` env, or `bot_trades`). It runs **paper only** — there is no live order routing, and adding it requires user API keys plus a supervised go-live.
+TradeCore has **no trading bot and no order routing**. It is an intelligence
+platform: it detects, scores and alerts, and a human trades.
 
-- Strategies live in `strategies.py` as pure functions with **frozen parameters that mirror a 12-month backtest** — changing them invalidates the forward test, so don't tune them casually.
-- `volevent` (disabled): vol-event momentum retrace — a 1h bar with |return| ≥ 3× trailing 30d mean TR% AND volume ≥ 3× 30d median triggers a limit entry at the 50% retrace; stop at the trigger bar's adverse extreme (1% floor); 50% off at +1.5R then a 1R trail. **Disabled 2026-09-23 after FAILING its gate** — at n=58 (nearly 2× the n≥30 gate) it averaged **−0.0887 net R** against the bake-off's +0.151R. The miss is winner *magnitude*, not hit rate: trail exits paid +0.760R where the backtest needed ~+1.3R, stops ran −1.061R on gap/fee slippage, and win rate was 44.8% vs 49.7%. The shortfall vs backtest is not statistically conclusive (t=−1.70) — but the gate was "beat the backtest average at n≥30", and invoking the t-stat after seeing the result is the retune-instead-of-disable move the pre-commitment forbids.
-- `fundingfade` (disabled): funding-percentile fade. **Disabled after a percentile tie/cap bug** — Bybit pins funding at a 0.0001 ceiling that is both the modal AND max value, so a `<=` percentile returned 1.0 on ordinary funding and fired false shorts. **Any percentile logic over funding must use strict `<` and treat the pinned ceiling as ordinary.**
-- Sizing is risk-normalized: `qty = equity × risk% / |entry − stop|`, capped at `equity × position_size_pct / entry`. If the notional cap binds, actual risk lands *below* the configured risk% — check which constraint binds before reasoning about exposure.
-- Evaluation is **pre-committed**: judge a strategy at its agreed n (volevent: n≥30 closed trades) against its backtest average net R. A strategy failing its gate gets its flag disabled — it does not get retuned. Net R (`realized_r_net`) is the metric, not win rate; R is normalized to risk, so sizing changes don't affect it.
-- Prod policy lives in `docker-compose.prod.yml` env (`MAJORSBOT_*`), not in code defaults, which stay conservative/off.
+Two bots existed and both were removed after failing their pre-committed
+evaluation gates — `bot`/WaveBot (retired 2026-08) and `majorsbot` (removed
+2026-09-24). Don't look for `app/modules/{bot,majorsbot}/`, `BOT_*` or
+`MAJORSBOT_*` env, or the `bot_trades` / `majorsbot_trades` tables.
+
+The forward-test record, for anyone tempted to rebuild one:
+
+| Strategy | n | Result | Verdict |
+| --- | --- | --- | --- |
+| volevent | 58 | −0.0887 avg net R vs a +0.151R backtest | failed its gate |
+| fundingfade | 28 | −0.4142 avg net R | disabled on a percentile tie/cap bug |
+| newsevent | 15 | +0.118% of equity | never reached its n≥30 gate |
+
+**Three strategies, zero survivors.** A separate BTC-only bake-off produced 0
+survivors from 27 variants. If a new bot is proposed, that is the base rate it
+argues against, and the discipline that killed these is the part worth keeping:
+pre-commit the metric and the n *before* trading, judge once, and disable rather
+than retune. Two lessons generalise beyond bots and still apply:
+
+- **R is invalid for any stopless strategy.** Without a real stop the R
+  denominator is a phantom unit — newsevent's ranged 5%–51% of equity, and two
+  trades doing near-identical damage booked −1.13R and −9.12R. Judge those on
+  % of equity.
+- **Validate a ranking metric's fire rate on live data before it gates
+  anything.** fundingfade's `<=` percentile returned 1.0 on ordinary funding
+  because Bybit pins the value at a ceiling that is both modal and max, and a
+  12-month backtest "passed" on the same broken predicate.
 
 ### Process layout — single API worker, separate scheduler container
 

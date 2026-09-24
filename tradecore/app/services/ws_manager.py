@@ -23,13 +23,11 @@ from app.services import redis_service
 from app.services.telegram_service import service as telegram_service
 
 UNREAD_BUFFER_SIZE = 20
-ALERT_MODULES = ("radarx", "whaleradar", "gemradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch", "majorsbot")
+ALERT_MODULES = ("radarx", "whaleradar", "gemradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch")
 
-# Modules whose alerts bypass the watchlist gate. majorsbot trades its own
-# universe (incl. news-driven symbols like STORJUSDT that nobody watchlists);
-# the user's own bot entering a position must never be silently swallowed
-# because the symbol isn't on a list.
-WATCHLIST_EXEMPT_MODULES = frozenset({"majorsbot"})
+# Modules whose alerts bypass the watchlist gate. Empty since the bots
+# were removed — every remaining module is watchlist-scoped.
+WATCHLIST_EXEMPT_MODULES: frozenset[str] = frozenset()
 
 
 class ConnectionManager:

@@ -15,7 +15,6 @@ from app.models.tradelog import Trade, TradeTag  # noqa: F401
 from app.models.performance import PerformanceSnapshot, SignalPerformance  # noqa: F401
 from app.models.delivery import UserAlertDelivery, AlertCooldown  # noqa: F401
 from app.models.news import NewsArticle  # noqa: F401
-from app.models.cmcpulse import TradeContextSnapshot  # noqa: F401
 from app.models.whale_entity import WhaleEntity, WhaleEntityAddress  # noqa: F401
 from app.models.exchange import ExchangeCredential  # noqa: F401
 from app.models.walletwatch import WalletSwap  # noqa: F401
@@ -27,4 +26,3 @@ from app.models.walletwatch_discovery import (  # noqa: F401
 from app.models.listing import NewListingEvent, ListingSignal  # noqa: F401
 from app.models.wavewatch import WaveAsset  # noqa: F401
 from app.models.chainpulse import ChainPulseSnapshot  # noqa: F401
-from app.models.majorsbot import MajorsBotTrade  # noqa: F401

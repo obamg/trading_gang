@@ -23,7 +23,6 @@ import NewsPulsePage from "@/pages/dashboard/newspulse";
 import WalletWatchPage from "@/pages/dashboard/walletwatch";
 import ListingWatchPage from "@/pages/dashboard/listings";
 import WaveWatchPage from "@/pages/dashboard/wavewatch";
-import MajorsBotPage from "@/pages/dashboard/majorsbot";
 import SettingsPage from "@/pages/settings";
 import LandingPage from "@/pages/landing";
 import { useAuthStore } from "@/stores/authStore";
@@ -120,7 +119,6 @@ export default function App() {
             <Route path="/walletwatch" element={<WalletWatchPage />} />
             <Route path="/listings" element={<ListingWatchPage />} />
             <Route path="/wavewatch" element={<WaveWatchPage />} />
-            <Route path="/majorsbot" element={<MajorsBotPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
 
