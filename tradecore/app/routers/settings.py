@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.dependencies import CurrentUser, DBSession
 from app.models.settings import UserSettings
+from app.services.telegram_service import LINK_TOKEN_TTL
 from app.services.telegram_service import service as telegram_service
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -85,9 +86,22 @@ async def update_settings(body: SettingsUpdate, user: CurrentUser, db: DBSession
 
 @router.post("/telegram/link-token")
 async def create_telegram_link_token(user: CurrentUser, db: DBSession):
+    """Issue a connect code, plus the one-tap deep link when we have one.
+
+    ``deep_link`` is the point of the flow: it opens the bot with the code
+    already attached, so nobody copies a token between apps. It is None when
+    the bot has not resolved its own username (get_me failed, or the bot is
+    disabled) — the UI then falls back to showing the code for a manual
+    ``/link``. ``token`` keeps its original meaning, so older clients that
+    read only that field are unaffected.
+    """
     await _get_or_create(db, user)
     token = await telegram_service.create_link_token(user.id)
-    return {"token": token}
+    return {
+        "token": token,
+        "deep_link": telegram_service.deep_link(token),
+        "expires_in_seconds": LINK_TOKEN_TTL,
+    }
 
 
 @router.delete("/telegram")

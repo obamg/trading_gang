@@ -36,6 +36,7 @@ class TelegramService:
     def __init__(self) -> None:
         self._app = None  # python-telegram-bot Application
         self._running = False
+        self._bot_username: str | None = None  # filled by get_me() on start
 
     # ---------- link token mgmt ----------
 
@@ -94,16 +95,55 @@ class TelegramService:
         app = Application.builder().token(settings.telegram_bot_token).build()
         app.add_handler(CommandHandler("start", self._cmd_start))
         app.add_handler(CommandHandler("link", self._cmd_link))
+        app.add_handler(CommandHandler("help", self._cmd_help))
         app.add_handler(CommandHandler("status", self._cmd_status))
         app.add_handler(CommandHandler("pause", self._cmd_pause))
         app.add_handler(CommandHandler("resume", self._cmd_resume))
 
         await app.initialize()
         await app.start()
+
+        # Ask Telegram who we are, so the app can build t.me deep links without
+        # a hand-maintained TELEGRAM_BOT_USERNAME env var — one less setting to
+        # get wrong at deploy time, and it cannot drift from the real bot.
+        try:
+            me = await app.bot.get_me()
+            self._bot_username = me.username
+        except Exception as e:  # non-fatal — /link still works without it
+            log.warning("telegram_get_me_failed", error=str(e))
+
+        # Register the command menu so commands are discoverable from
+        # Telegram's ☰ button, not just from our welcome text.
+        try:
+            from telegram import BotCommand
+
+            await app.bot.set_my_commands([
+                BotCommand("start", "Connect your TradeCore account"),
+                BotCommand("status", "Are alerts on? Am I paused?"),
+                BotCommand("pause", "Mute alerts for 1 hour"),
+                BotCommand("resume", "Turn alerts back on"),
+                BotCommand("help", "What this bot can do"),
+            ])
+        except Exception as e:
+            log.warning("telegram_set_commands_failed", error=str(e))
+
         await app.updater.start_polling(drop_pending_updates=True)
         self._app = app
         self._running = True
-        log.info("telegram_bot_started")
+        log.info("telegram_bot_started", bot_username=self._bot_username)
+
+    def deep_link(self, token: str) -> str | None:
+        """`t.me` URL that connects the account in one tap.
+
+        Telegram delivers the payload as `/start <token>`, so the user never
+        copies anything between apps — that copy-paste step was both the main
+        drop-off point and the reason the bot was unfindable (nothing in the
+        UI said which bot to open). None when get_me() failed; callers fall
+        back to showing the raw token for a manual /link.
+        """
+        if not self._bot_username:
+            return None
+        return f"https://t.me/{self._bot_username}?start={token}"
 
     async def stop(self) -> None:
         if not self._running or self._app is None:
@@ -121,23 +161,79 @@ class TelegramService:
     # ---------- command handlers ----------
 
     async def _cmd_start(self, update, context) -> None:
+        """Welcome, or connect straight away when opened via a deep link.
+
+        `t.me/<bot>?start=<token>` arrives here with the token in
+        ``context.args`` — so the happy path is one tap and the user never
+        sees a token at all.
+        """
+        args = context.args or []
+        if args:
+            await self._link_user(update, args[0])
+            return
+
+        chat_id = update.effective_chat.id
+        async with AsyncSessionLocal() as db:
+            already = await self._settings_by_chat(db, chat_id)
+        if already is not None:
+            await update.message.reply_text(
+                "👋 You're already connected — alerts land right here.\n\n"
+                "/status — check what's on\n"
+                "/pause — quiet for an hour\n"
+                "/help — everything I can do",
+            )
+            return
+
         await update.message.reply_text(
             "👋 *Welcome to TradeCore*\n\n"
-            "To receive alerts, open TradeCore → Settings → Connect Telegram. "
-            "Copy the link token you're shown, then reply here with:\n\n"
-            "`/link YOUR_TOKEN`",
+            "I send you trading alerts the moment they fire — whale moves, new "
+            "listings, unusual volume and news that actually moves price.\n\n"
+            "*To connect, one tap:*\n"
+            "Open TradeCore → *Settings* → *Connect Telegram*, then press the "
+            "button there. It brings you straight back here and we're done.\n\n"
+            "_No codes to copy. If you'd rather do it by hand, Settings also "
+            "shows a code you can send as_ `/link YOUR_CODE`_._",
+            parse_mode="Markdown",
+        )
+
+    async def _cmd_help(self, update, context) -> None:
+        await update.message.reply_text(
+            "*What I can do*\n\n"
+            "/status — is everything connected and are alerts flowing?\n"
+            "/pause — mute me for an hour (I'll come back on my own)\n"
+            "/resume — turn alerts back on now\n"
+            "/start — connect an account, or check you're connected\n\n"
+            "Not getting alerts? Send /status — it'll tell you which part is off.",
             parse_mode="Markdown",
         )
 
     async def _cmd_link(self, update, context) -> None:
         args = context.args or []
         if not args:
-            await update.message.reply_text("Usage: `/link <token>`", parse_mode="Markdown")
+            await update.message.reply_text(
+                "Almost there — I need your connect code.\n\n"
+                "Open TradeCore → *Settings* → *Connect Telegram*. Tap the "
+                "button there and it connects you automatically, or send me "
+                "the code it shows like this:\n\n"
+                "`/link abc123...`",
+                parse_mode="Markdown",
+            )
             return
-        user_id = await self._consume_link_token(args[0])
+        await self._link_user(update, args[0])
+
+    async def _link_user(self, update, token: str) -> None:
+        """Shared by /start <token> (deep link) and /link <token> (manual)."""
+        user_id = await self._consume_link_token(token)
         if user_id is None:
-            await update.message.reply_text("❌ Invalid or expired token.")
+            await update.message.reply_text(
+                "That code didn't work — they expire after 10 minutes, so it "
+                "has most likely just timed out.\n\n"
+                "Head back to TradeCore → *Settings* → *Connect Telegram* and "
+                "tap the button again. The new one will work.",
+                parse_mode="Markdown",
+            )
             return
+
         chat_id = update.effective_chat.id
         async with AsyncSessionLocal() as db:
             result = await db.execute(
@@ -145,24 +241,55 @@ class TelegramService:
             )
             us = result.scalar_one_or_none()
             if us is None:
-                await update.message.reply_text("❌ No settings row for this account.")
+                # Shouldn't happen — the settings row is created when the token
+                # is issued. Keep it human anyway; "no settings row" means
+                # nothing to the person reading it.
+                log.warning("telegram_link_no_settings_row", user_id=str(user_id))
+                await update.message.reply_text(
+                    "Something went wrong on our side connecting your account. "
+                    "Please try again from TradeCore → Settings, and if it keeps "
+                    "happening let us know.",
+                )
                 return
             us.telegram_chat_id = str(chat_id)
             us.telegram_enabled = True
             await db.commit()
-        await update.message.reply_text("✅ Telegram linked. You'll now receive alerts here.")
+
+        await update.message.reply_text(
+            "✅ *You're connected.*\n\n"
+            "Alerts will arrive here as they happen. Nothing else to set up.\n\n"
+            "If it ever gets noisy, send /pause for an hour of quiet, or "
+            "/status to see what's on. /help lists the rest.",
+            parse_mode="Markdown",
+        )
 
     async def _cmd_status(self, update, context) -> None:
         chat_id = update.effective_chat.id
         async with AsyncSessionLocal() as db:
             us = await self._settings_by_chat(db, chat_id)
         if us is None:
-            await update.message.reply_text("❌ Not linked. Use `/link <token>` first.", parse_mode="Markdown")
+            await update.message.reply_text(
+                "This chat isn't connected to a TradeCore account yet.\n\n"
+                "Open TradeCore → *Settings* → *Connect Telegram* and tap the "
+                "button — it brings you back here and connects you in one step.",
+                parse_mode="Markdown",
+            )
             return
         paused = await self.is_paused(chat_id)
+
+        # Say what the state MEANS, not just what it is — "enabled: ❌" left
+        # people with no idea why alerts stopped or how to fix it.
+        if paused:
+            verdict = "⏸ Paused — quiet until the hour is up. /resume to start now."
+        elif not us.telegram_enabled:
+            verdict = "🔕 Alerts are switched off for this chat. Turn them back on in TradeCore → Settings."
+        else:
+            verdict = "🔔 All good — alerts are flowing to this chat."
+
         await update.message.reply_text(
-            f"📊 *Status*\n"
-            f"Linked: ✅\n"
+            f"📊 *Status*\n\n"
+            f"{verdict}\n\n"
+            f"Connected: ✅\n"
             f"Alerts enabled: {'✅' if us.telegram_enabled else '❌'}\n"
             f"Paused: {'⏸ yes' if paused else '▶️ no'}",
             parse_mode="Markdown",

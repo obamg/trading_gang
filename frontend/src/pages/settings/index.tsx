@@ -10,6 +10,7 @@ import {
   apiUpdateSettings,
   apiCreateTelegramToken,
   apiUnlinkTelegram,
+  type TelegramLinkInfo,
   type UserSettings,
 } from "@/api/settings";
 
@@ -85,7 +86,7 @@ export default function SettingsPage() {
   });
 
   const [draft, setDraft] = useState<Partial<UserSettings>>({});
-  const [tgToken, setTgToken] = useState<string | null>(null);
+  const [tgLink, setTgLink] = useState<TelegramLinkInfo | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -116,8 +117,7 @@ export default function SettingsPage() {
   }
 
   async function generateToken() {
-    const token = await linkMut.mutateAsync();
-    setTgToken(token);
+    setTgLink(await linkMut.mutateAsync());
   }
 
   const browserNotifs = useSettingsStore((s) => s.browserNotifications);
@@ -195,23 +195,58 @@ export default function SettingsPage() {
           ) : (
             <div className="space-y-3 py-2">
               <p className="text-sm text-textSecondary">
-                Connect your Telegram to receive alerts. Click below to generate a
-                link token, then send <code className="text-xs bg-bgSecondary px-1.5 py-0.5 rounded">/link TOKEN</code> to
-                the TradeCore bot.
+                Get alerts in Telegram the moment they fire — whale moves, new
+                listings, unusual volume and news that actually moves price.
               </p>
-              {tgToken ? (
-                <div className="rounded-md border border-borderSubtle bg-bgSecondary p-3">
-                  <div className="text-xs text-textMuted mb-1">Your link token (expires in 10 min):</div>
-                  <code className="text-sm font-mono text-primary-400 select-all break-all">{tgToken}</code>
-                </div>
-              ) : (
+              {!tgLink ? (
                 <button
                   onClick={generateToken}
                   disabled={linkMut.isPending}
                   className="rounded-md bg-primary-500 px-4 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
                 >
-                  {linkMut.isPending ? "Generating..." : "Generate Link Token"}
+                  {linkMut.isPending ? "Preparing…" : "Connect Telegram"}
                 </button>
+              ) : tgLink.deep_link ? (
+                // Happy path: the link carries the code, so Telegram opens the
+                // bot already connected. No copying between apps — that step
+                // was where people gave up.
+                <div className="space-y-2">
+                  <a
+                    href={tgLink.deep_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-md bg-primary-500 px-4 py-2 text-sm font-medium text-white hover:bg-primary-600"
+                  >
+                    Open Telegram and connect →
+                  </a>
+                  <p className="text-xs text-textMuted">
+                    Opens the TradeCore bot and connects you automatically.
+                    Expires in {Math.round(tgLink.expires_in_seconds / 60)} minutes —
+                    just press Connect again if it runs out.
+                  </p>
+                  <details className="text-xs text-textMuted">
+                    <summary className="cursor-pointer hover:text-textSecondary">
+                      Telegram not on this device?
+                    </summary>
+                    <div className="mt-2 rounded-md border border-borderSubtle bg-bgSecondary p-3">
+                      <div className="mb-1">Send this to the TradeCore bot:</div>
+                      <code className="text-sm font-mono text-primary-400 select-all break-all">
+                        /link {tgLink.token}
+                      </code>
+                    </div>
+                  </details>
+                </div>
+              ) : (
+                // Fallback: bot username unresolved (get_me failed or bot off).
+                <div className="rounded-md border border-borderSubtle bg-bgSecondary p-3">
+                  <div className="text-xs text-textMuted mb-1">
+                    Send this to the TradeCore bot (expires in{" "}
+                    {Math.round(tgLink.expires_in_seconds / 60)} min):
+                  </div>
+                  <code className="text-sm font-mono text-primary-400 select-all break-all">
+                    /link {tgLink.token}
+                  </code>
+                </div>
               )}
             </div>
           )}
