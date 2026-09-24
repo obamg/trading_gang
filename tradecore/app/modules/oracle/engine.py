@@ -14,6 +14,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
+from app.config import settings as app_settings
 from app.logging_config import log
 from app.models.oracle import OracleOutcome, OracleSignal
 from app.models.gemradar import GemRadarAlert
@@ -468,6 +469,48 @@ def _atr_from_candles(candles: list[dict], period: int = 14) -> float:
     return statistics.fmean(trs)
 
 
+# ---------- alert decision (pure) ----------
+
+def should_alert(
+    score: int,
+    confluence: int,
+    trailing_abs_scores: list[int],
+    *,
+    min_confluence: int,
+    min_abs_score: int,
+    percentile: float,
+    min_sample: int,
+) -> tuple[bool, str]:
+    """Decide whether a fresh signal is rare enough to page a human.
+
+    Returns (alert, reason). Pure so the matrix is unit-testable. The
+    percentile rule only engages once the trailing window is big enough to
+    define "rare"; until then the absolute floor alone applies, so day one
+    cannot page on the first mildly-nonzero score it sees.
+    """
+    a = abs(int(score))
+    if confluence < min_confluence:
+        return False, f"confluence {confluence} < {min_confluence}"
+    if a < min_abs_score:
+        return False, f"|score| {a} < floor {min_abs_score}"
+    if len(trailing_abs_scores) >= min_sample:
+        ranked = sorted(trailing_abs_scores)
+        cut = ranked[min(len(ranked) - 1, int(percentile * len(ranked)))]
+        if a < cut:
+            return False, f"|score| {a} < p{int(percentile * 100)} cut {cut} (n={len(ranked)})"
+        return True, f"|score| {a} >= p{int(percentile * 100)} cut {cut} (n={len(ranked)})"
+    return True, f"|score| {a} >= floor (warmup n={len(trailing_abs_scores)} < {min_sample})"
+
+
+def agreeing_modules(breakdown: dict, score: int) -> list[str]:
+    """Modules whose direction matches the signal and actually contributed."""
+    want = "bullish" if score > 0 else "bearish" if score < 0 else None
+    if want is None or not isinstance(breakdown, dict):
+        return []
+    return [m for m, v in breakdown.items()
+            if isinstance(v, dict) and v.get("direction") == want and (v.get("contribution") or 0) != 0]
+
+
 # ---------- main entry points ----------
 
 async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None = None) -> dict:
@@ -669,15 +712,40 @@ async def generate_signal(
         "signal_at": signal_at.isoformat(),
     }
 
-    if abs(int(live["score"])) >= min_score_to_alert:
+    # ---- Telegram alert gate: rarity, confluence, cooldown, daily cap ----
+    score_i = int(live["score"])
+    since = signal_at - timedelta(hours=24)
+    trailing = [int(v) for (v,) in (await db.execute(
+        select(OracleSignal.score).where(OracleSignal.signal_at >= since, OracleSignal.id != row.id)
+    )).all()]
+    ok, why = should_alert(
+        score_i, int(live["confluence_count"]), [abs(v) for v in trailing],
+        min_confluence=app_settings.oracle_alert_min_confluence,
+        min_abs_score=app_settings.oracle_alert_min_abs_score,
+        percentile=app_settings.oracle_alert_percentile,
+        min_sample=app_settings.oracle_alert_min_sample,
+    )
+    if ok and await redis_service.is_on_cooldown("oracle", sym):
+        ok, why = False, "symbol on cooldown"
+    if ok:
+        r = redis_service.get_redis()
+        day_key = f"oracle:alerts:{signal_at:%Y%m%d}"
+        n_today = int(await r.incr(day_key))
+        await r.expire(day_key, 26 * 3600)
+        if n_today > app_settings.oracle_alert_daily_cap:
+            ok, why = False, f"daily cap {app_settings.oracle_alert_daily_cap} reached"
+    if ok:
+        payload["agreeing_modules"] = agreeing_modules(live["signals_breakdown"], score_i)
+        payload["alert_reason"] = why
+        row.alerted = True
+        await db.commit()
+        await redis_service.set_alert_cooldown("oracle", sym, app_settings.oracle_alert_cooldown_minutes)
         await redis_service.publish_alert("oracle", payload)
-        log.info(
-            "oracle_signal_published",
-            symbol=sym,
-            score=int(live["score"]),
-            recommendation=live["recommendation"],
-        )
-
+        log.info("oracle_signal_published", symbol=sym, score=score_i, why=why,
+                 modules=payload["agreeing_modules"])
+    else:
+        # Never silent: every non-alert says why, at info so it is greppable.
+        log.info("oracle_alert_suppressed", symbol=sym, score=score_i, why=why)
     return payload
 
 

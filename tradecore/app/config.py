@@ -86,6 +86,21 @@ class Settings(BaseSettings):
     radarx_ratio_threshold: float = 4.0
     min_volume_24h_usd: float = 10_000_000.0
 
+    # Oracle -> Telegram alerting. Oracle scores every radarx/whaleradar trigger
+    # (~5/min). A fixed |score| bar cannot work: the first day of real data spans
+    # -17..+15 with confluence <= 2, so 65 meant permanent silence and 10 would
+    # page on noise. Alert on RARITY instead: |score| must sit in the top
+    # (1 - percentile) of the trailing 24h, once that window holds min_sample
+    # signals; before then only the absolute floor applies. Cooldown + daily cap
+    # bound the noise regardless. Every published alert sets oracle_signals.alerted
+    # so alerted-vs-not outcomes can be compared -- that comparison is the gate.
+    oracle_alert_min_confluence: int = 2
+    oracle_alert_min_abs_score: int = 20
+    oracle_alert_percentile: float = 0.97
+    oracle_alert_min_sample: int = 100
+    oracle_alert_cooldown_minutes: int = 120
+    oracle_alert_daily_cap: int = 12
+
     # Analysis modules (Team 5)
     coingecko_api_key: str = ""
     # CoinMarketCap. Empty = every CMC call short-circuits to None and each
