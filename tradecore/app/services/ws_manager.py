@@ -191,13 +191,19 @@ class ConnectionManager:
                 UserSettings.telegram_chat_id.isnot(None),
             )
         )
+        # Fan out ONCE PER CHAT, not once per settings row. Two accounts can link
+        # the same Telegram chat (it happened: two users, one chat_id), and the
+        # person on the other end got every alert twice. The watchlist gate is
+        # evaluated per user, so a chat is sent to if ANY of its linked users
+        # should receive the alert.
+        sent: set[str] = set()
         for us in result.scalars():
+            if not us.telegram_chat_id or us.telegram_chat_id in sent:
+                continue
             if symbol and not await self._user_should_receive(db, us.user_id, module, symbol):
                 continue
-            try:
-                chat_id = int(us.telegram_chat_id)  # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                continue
+            sent.add(us.telegram_chat_id)
+            chat_id = int(us.telegram_chat_id)
             asyncio.create_task(telegram_service.send_alert(chat_id, module, payload))
 
 
