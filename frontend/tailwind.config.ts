@@ -34,7 +34,6 @@ const config: Config = {
         "mod-liquidmap": "#F97316",
         "mod-sentimentpulse": "#A855F7",
         "mod-macropulse": "#6366F1",
-        "mod-gemradar": "#10B981",
         "mod-riskcalc": "#EAB308",
         "mod-tradelog": "#94A3B8",
         "mod-performancecore": "#14B8A6",

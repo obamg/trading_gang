@@ -4,7 +4,6 @@ export type ModuleKey =
   | "liquidmap"
   | "sentimentpulse"
   | "macropulse"
-  | "gemradar"
   | "riskcalc"
   | "performancecore"
   | "oracle"

@@ -29,11 +29,6 @@ class UserSettings(Base):
     # WhaleRadar
     whaleradar_min_trade_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), default=Decimal("300000"), server_default="300000")
     whaleradar_min_onchain_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), default=Decimal("500000"), server_default="500000")
-    # GemRadar
-    gemradar_min_mcap_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), default=Decimal("1000000"), server_default="1000000")
-    gemradar_max_mcap_usd: Mapped[Decimal] = mapped_column(Numeric(20, 2), default=Decimal("100000000"), server_default="100000000")
-    gemradar_min_price_change: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("10.0"), server_default="10.0")
-    gemradar_risk_tolerance: Mapped[str] = mapped_column(String(20), default="medium", server_default="medium")
     # Oracle
     oracle_min_score: Mapped[int] = mapped_column(Integer, default=65, server_default="65")
     oracle_min_confluence: Mapped[int] = mapped_column(Integer, default=4, server_default="4")
@@ -48,7 +43,6 @@ class UserSettings(Base):
     weight_radarx: Mapped[int] = mapped_column(Integer, default=15, server_default="15")
     weight_liquidmap: Mapped[int] = mapped_column(Integer, default=15, server_default="15")
     weight_sentimentpulse: Mapped[int] = mapped_column(Integer, default=15, server_default="15")
-    weight_gemradar: Mapped[int] = mapped_column(Integer, default=10, server_default="10")
     # General
     default_account_balance_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
     risk_per_trade_pct: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("1.0"), server_default="1.0")

@@ -277,17 +277,6 @@ export default function SettingsPage() {
         </CardBody>
       </Card>
 
-      {/* GemRadar thresholds */}
-      <Card>
-        <CardHeader>GemRadar Thresholds</CardHeader>
-        <CardBody>
-          <div className="divide-y divide-borderSubtle">
-            <NumberInput label="Min market cap" value={draft.gemradar_min_mcap_usd ?? 1_000_000} onChange={(v) => patch("gemradar_min_mcap_usd", v)} step={500_000} min={0} suffix="USD" />
-            <NumberInput label="Max market cap" value={draft.gemradar_max_mcap_usd ?? 100_000_000} onChange={(v) => patch("gemradar_max_mcap_usd", v)} step={10_000_000} min={0} suffix="USD" />
-          </div>
-        </CardBody>
-      </Card>
-
       {/* Oracle */}
       <Card>
         <CardHeader>Oracle</CardHeader>

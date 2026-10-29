@@ -13,7 +13,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
-from app.modules.gemradar import detector as gemradar_detector
 from app.modules.macropulse import collector as macropulse_collector
 from app.modules.oracle import board as oracle_board
 from app.modules.oracle import engine as oracle_engine
@@ -69,7 +68,7 @@ async def run_exchange_sync_all() -> None:
 
 async def refresh_symbol_list() -> None:
     # BinanceStreamManager already runs its own hourly rediscovery; this is a
-    # safety net so GemRadar / tests don't get stuck with an empty set.
+    # safety net so tests don't get stuck with an empty set.
     symbols = await redis_service.get_symbol_list()
     if symbols:
         return
@@ -114,22 +113,6 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         seconds=60,
         id="whale_onchain_poll",
-        coalesce=True,
-        max_instances=1,
-    )
-    sched.add_job(
-        gemradar_detector.run_scan,
-        "interval",
-        minutes=2,
-        id="gemradar_scan",
-        coalesce=True,
-        max_instances=1,
-    )
-    sched.add_job(
-        gemradar_detector.run_cex_listing_scan,
-        "interval",
-        minutes=15,
-        id="gemradar_cex_listings",
         coalesce=True,
         max_instances=1,
     )

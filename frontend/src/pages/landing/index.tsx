@@ -90,7 +90,6 @@ const MODULE_BLURBS: Record<string, string> = {
   liquidmap: "Heatmap of where leverage is stacked and ready to unwind.",
   sentimentpulse: "Funding, long/short ratios, and crowd positioning at a glance.",
   macropulse: "DXY, VIX, yields, and ETF flows distilled into a macro score.",
-  gemradar: "Early-stage tokens with liquidity and risk scoring.",
   riskcalc: "Size every trade correctly before you click — no more guessing.",
   performancecore: "Win rate, expectancy, drawdown — brutal honesty on demand.",
   oracle: "Six modules voting on every setup, scored and sorted for you.",
