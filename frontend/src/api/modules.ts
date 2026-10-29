@@ -148,34 +148,6 @@ export const macroApi = {
   history: (days = 30) => http.get<Paginated<MacroSnapshot>>("/macro/history", { params: { days } }).then((r) => r.data),
 };
 
-// ---------- GemRadar ----------
-export interface GemAlert {
-  id: string;
-  symbol: string;
-  name: string | null;
-  chain: string | null;
-  contract_address: string | null;
-  price_usd: number | null;
-  market_cap_usd: number | null;
-  liquidity_usd: number | null;
-  volume_24h_usd: number | null;
-  volume_usd_current: number | null;
-  price_change_5m: number | null;
-  price_change_1h: number | null;
-  price_change_24h: number | null;
-  risk_score_numeric: number | null;
-  risk_label: string | null;
-  risk_flags: string[] | null;
-  dex: string | null;
-  detected_at: string;
-}
-export const gemApi = {
-  alerts: (params?: { risk?: string; limit?: number }) =>
-    http.get<Paginated<GemAlert>>("/gemradar/alerts", { params }).then((r) => r.data),
-  trending: () => http.get<Paginated<GemAlert>>("/gemradar/trending").then((r) => r.data),
-  newListings: () => http.get<Paginated<{ symbol: string; exchange: string; listed_at: string }>>("/gemradar/new-listings").then((r) => r.data),
-};
-
 // ---------- RiskCalc ----------
 export interface CalcResult {
   id: string;

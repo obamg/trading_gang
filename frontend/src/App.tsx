@@ -14,7 +14,6 @@ import WhaleRadarPage from "@/pages/dashboard/whaleradar";
 import LiquidMapPage from "@/pages/dashboard/liquidmap";
 import SentimentPage from "@/pages/dashboard/sentiment";
 import MacroPage from "@/pages/dashboard/macro";
-import GemRadarPage from "@/pages/dashboard/gemradar";
 import RiskCalcPage from "@/pages/dashboard/riskcalc";
 import PerformancePage from "@/pages/dashboard/performance";
 import OraclePage from "@/pages/dashboard/oracle";
@@ -110,7 +109,6 @@ export default function App() {
             <Route path="/liquidmap" element={<LiquidMapPage />} />
             <Route path="/sentiment" element={<SentimentPage />} />
             <Route path="/macro" element={<MacroPage />} />
-            <Route path="/gemradar" element={<GemRadarPage />} />
             <Route path="/riskcalc" element={<RiskCalcPage />} />
             <Route path="/performance" element={<PerformancePage />} />
             <Route path="/oracle" element={<OraclePage />} />

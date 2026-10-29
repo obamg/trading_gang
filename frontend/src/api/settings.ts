@@ -9,8 +9,6 @@ export interface UserSettings {
   radarx_cooldown_minutes: number;
   whaleradar_min_trade_usd: number;
   whaleradar_min_onchain_usd: number;
-  gemradar_min_mcap_usd: number;
-  gemradar_max_mcap_usd: number;
   oracle_min_score: number;
   oracle_min_confluence: number;
 }

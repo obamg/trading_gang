@@ -17,7 +17,6 @@ from app.database import AsyncSessionLocal
 from app.config import settings as app_settings
 from app.logging_config import log
 from app.models.oracle import OracleOutcome, OracleSignal
-from app.models.gemradar import GemRadarAlert
 from app.models.radarx import RadarXAlert
 from app.models.sentiment import SentimentSnapshot
 from app.models.whaleradar import OISurgeEvent, WhaleTrade
@@ -29,27 +28,20 @@ from app.modules.sentimentpulse.collector import get_funding_fast
 from app.modules.whaleradar.detector import get_slow_oi_signal
 from app.services import redis_service
 
+# Rescaled x100/92 when GemRadar (8) was removed, so relative weights are unchanged.
 DEFAULT_WEIGHTS = {
-    "macropulse": 18,
-    "whaleradar": 16,
-    "flowpulse": 13,
-    "divergence": 12,       # leading-indicator-vs-price disagreement
-    "radarx": 11,
-    "liquidmap": 11,
-    "sentimentpulse": 11,
-    "gemradar": 8,
+    "macropulse": 20,
+    "whaleradar": 17,
+    "flowpulse": 14,
+    "divergence": 13,       # leading-indicator-vs-price disagreement
+    "radarx": 12,
+    "liquidmap": 12,
+    "sentimentpulse": 12,
 }
 
 # Liquidmap window — widened from ±2% to ±5% to catch larger magnet zones
 # that signal probable big moves before they trigger.
 LIQ_SWEEP_PCT = 0.05
-
-# Majors where GemRadar doesn't apply.
-MAJOR_SYMBOLS = {
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
-    "DOGEUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "MATICUSDT",
-}
-
 
 def _dir(value: int) -> str:
     if value > 0:
@@ -386,43 +378,6 @@ async def _divergence_signal(db: AsyncSession, symbol: str) -> dict:
     }
 
 
-async def _gemradar_signal(db: AsyncSession, symbol: str) -> dict:
-    # Small-caps only; majors return zero-intensity.
-    if symbol.upper() in MAJOR_SYMBOLS:
-        return {"direction": "neutral", "intensity": 0.0, "detail": None}
-
-    since = datetime.now(timezone.utc) - timedelta(hours=1)
-    row = (
-        await db.execute(
-            select(GemRadarAlert)
-            .where(GemRadarAlert.symbol == symbol, GemRadarAlert.detected_at >= since)
-            .order_by(desc(GemRadarAlert.detected_at))
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        return {"direction": "neutral", "intensity": 0.0, "detail": None}
-
-    price_change = float(row.price_change_pct or 0)
-    direction = "bullish" if price_change > 0 else ("bearish" if price_change < 0 else "neutral")
-    # Intensity: inverse of risk score (low risk = high confidence) combined with volume
-    risk_numeric = row.risk_score_numeric or 50
-    risk_factor = _clip01(1.0 - risk_numeric / 100.0)
-    vol_factor = _clip01(float(row.volume_mcap_ratio or 0) / 0.5)
-    intensity = _clip01((risk_factor + vol_factor) / 2.0)
-    return {
-        "direction": direction,
-        "intensity": round(intensity, 3),
-        "detail": {
-            "price_change_pct": price_change,
-            "risk_score": row.risk_score,
-            "volume_mcap_ratio": float(row.volume_mcap_ratio) if row.volume_mcap_ratio else None,
-        },
-    }
-
-
-# ---------- scoring ----------
-
 def _score_to_recommendation(score: float) -> str:
     if score >= 75:
         return "strong_long"
@@ -529,7 +484,6 @@ async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None
     }
     sent = await _sentiment_signal(db, sym)
     macro = await _macro_signal()
-    gem = await _gemradar_signal(db, sym)
     flow = await _flowpulse_signal(sym)
     diverg = await _divergence_signal(db, sym)
 
@@ -540,7 +494,6 @@ async def compute_live_score(db: AsyncSession, symbol: str, weights: dict | None
         "liquidmap": liq,
         "sentimentpulse": sent,
         "macropulse": macro,
-        "gemradar": gem,
         "divergence": diverg,
     }
 

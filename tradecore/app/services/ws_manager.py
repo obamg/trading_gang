@@ -23,7 +23,7 @@ from app.services import redis_service
 from app.services.telegram_service import service as telegram_service
 
 UNREAD_BUFFER_SIZE = 20
-ALERT_MODULES = ("radarx", "whaleradar", "gemradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch")
+ALERT_MODULES = ("radarx", "whaleradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch")
 
 # Modules whose alerts bypass the watchlist gate. Oracle is a DISCOVERY
 # signal — "which token, right now" — so scoping it to a watchlist the user

@@ -189,7 +189,6 @@ async def generate(payload: GenerateRequest, user: CurrentUser, db: DBSession):
             "radarx": row.weight_radarx,
             "liquidmap": row.weight_liquidmap,
             "sentimentpulse": row.weight_sentimentpulse,
-            "gemradar": row.weight_gemradar,
         }
         min_score = int(row.oracle_min_score)
         is_paper = bool(row.oracle_paper_mode)
@@ -214,7 +213,6 @@ class SettingsUpdate(BaseModel):
     weight_radarx: int | None = Field(default=None, ge=0, le=100)
     weight_liquidmap: int | None = Field(default=None, ge=0, le=100)
     weight_sentimentpulse: int | None = Field(default=None, ge=0, le=100)
-    weight_gemradar: int | None = Field(default=None, ge=0, le=100)
     oracle_min_score: int | None = Field(default=None, ge=0, le=100)
     oracle_min_confluence: int | None = Field(default=None, ge=0, le=6)
     oracle_paper_mode: bool | None = None
@@ -239,7 +237,6 @@ async def update_settings(payload: SettingsUpdate, user: CurrentUser, db: DBSess
         "weight_radarx": row.weight_radarx,
         "weight_liquidmap": row.weight_liquidmap,
         "weight_sentimentpulse": row.weight_sentimentpulse,
-        "weight_gemradar": row.weight_gemradar,
         "oracle_min_score": row.oracle_min_score,
         "oracle_min_confluence": row.oracle_min_confluence,
         "oracle_paper_mode": row.oracle_paper_mode,

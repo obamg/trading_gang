@@ -40,7 +40,7 @@ Test login: `test@example.com` / `test1234`.
 
 The backend is organized as **module packages** under `tradecore/app/modules/`. Each module is a self-contained vertical (detector + router + sometimes a model file in `app/models/`):
 
-`radarx`, `whaleradar`, `liquidmap`, `sentimentpulse`, `macropulse`, `gemradar`, `riskcalc`, `performance`, `oracle`, `flowpulse`, `newspulse`, `positionmonitor`, `exchanges`, `listingwatch`, `awakening`, `wavewatch`, `walletwatch` (+ `walletwatch/discovery` sub-module for PnL-based wallet auto-discovery), `chainpulse`.
+`radarx`, `whaleradar`, `liquidmap`, `sentimentpulse`, `macropulse`, `riskcalc`, `performance`, `oracle`, `flowpulse`, `newspulse`, `positionmonitor`, `exchanges`, `listingwatch`, `awakening`, `wavewatch`, `walletwatch` (+ `walletwatch/discovery` sub-module for PnL-based wallet auto-discovery), `chainpulse`.
 
 Each module typically exposes:
 - `router.py` — FastAPI router, mounted from `app/main.py`
