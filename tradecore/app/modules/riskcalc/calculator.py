@@ -5,6 +5,10 @@ Pure functions — no DB access. The router handles persistence.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+# Funding rate against your side above this (fraction per 8h) blocks the trade.
+MAX_FUNDING_AGAINST = 0.0005
 
 
 @dataclass
@@ -18,6 +22,20 @@ class RiskInput:
     asset_type: str = "futures"  # futures | spot
     side: str = "long"            # long | short
     maintenance_margin_rate: float = 0.004  # Binance smallest tier default (0.4%)
+    taker_fee_pct: float = 0.05      # per side, Binance VIP 0 taker
+    stop_slippage_pct: float = 0.05  # assumed extra fill past the stop
+    funding_rate: float | None = None  # fraction per 8h; > 0 means longs pay
+    funding_settlements: int = 0       # settlements inside the holding window
+
+
+def funding_settlements(now: datetime, hold_hours: float) -> int:
+    """Count 00/08/16 UTC funding settlements in (now, now + hold_hours]."""
+    end = now + timedelta(hours=hold_hours)
+    t = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=now.hour % 8)
+    n = 0
+    while (t := t + timedelta(hours=8)) <= end:
+        n += 1
+    return n
 
 
 def _get_mmr_for_notional(notional_usd: float) -> float:
@@ -59,7 +77,10 @@ def calculate_position(params: RiskInput) -> dict:
     stop_distance = abs(entry - stop) / entry  # as fraction
     stop_distance_pct = stop_distance * 100.0
 
-    position_size_usd = risk_amount_usd / stop_distance
+    # Loss at the stop is the price move plus entry+exit taker fees and stop
+    # slippage, all proportional to notional. Size so the total fits the risk.
+    friction = (2 * params.taker_fee_pct + params.stop_slippage_pct) / 100.0
+    position_size_usd = risk_amount_usd / (stop_distance + friction)
     position_size_units = position_size_usd / entry
 
     # Leverage needed to hold this position given the account balance.
@@ -79,19 +100,36 @@ def calculate_position(params: RiskInput) -> dict:
         else:
             liquidation_price = entry * (1 + 1 / leverage - mmr)
 
-    max_loss_usd = position_size_units * abs(entry - stop)
+    fees_slippage_usd = position_size_usd * friction
+    max_loss_usd = position_size_units * abs(entry - stop) + fees_slippage_usd
 
     potential_profit_usd: float | None = None
     rr_ratio: float | None = None
     if tp is not None:
-        if side == "long":
-            potential_profit_usd = position_size_units * (tp - entry)
-            rr_ratio = (tp - entry) / (entry - stop) if entry != stop else None
-        else:
-            potential_profit_usd = position_size_units * (entry - tp)
-            rr_ratio = (entry - tp) / (stop - entry) if stop != entry else None
+        gross = position_size_units * (tp - entry if side == "long" else entry - tp)
+        potential_profit_usd = gross - position_size_usd * 2 * params.taker_fee_pct / 100.0
+        rr_ratio = potential_profit_usd / max_loss_usd if max_loss_usd > 0 else None
+
+    # Positive = you pay. Longs pay when the rate is positive, shorts when negative.
+    funding_against = (params.funding_rate or 0.0) * (1 if side == "long" else -1)
+    funding_cost_usd = position_size_usd * funding_against * params.funding_settlements
 
     warnings: list[str] = []
+    if friction * 100.0 >= stop_distance_pct:
+        warnings.append(
+            f"BLOCKED: Fees and slippage ({friction * 100:.2f}%) are at least the stop "
+            f"distance ({stop_distance_pct:.2f}%) — widen the stop"
+        )
+    if params.funding_settlements and funding_against > MAX_FUNDING_AGAINST:
+        warnings.append(
+            f"BLOCKED: Funding {funding_against * 100:.3f}%/8h against your side "
+            f"(max {MAX_FUNDING_AGAINST * 100:.2f}%)"
+        )
+    elif funding_cost_usd > 0:
+        warnings.append(
+            f"You pay ~${funding_cost_usd:.2f} funding over "
+            f"{params.funding_settlements} settlement(s) in the holding window"
+        )
     if leverage > 10:
         warnings.append("Leverage is high (>10x) — consider reducing position size")
     if liquidation_price is not None:
@@ -111,10 +149,13 @@ def calculate_position(params: RiskInput) -> dict:
         "leverage": round(leverage, 2),
         "liquidation_price": round(liquidation_price, 8) if liquidation_price else None,
         "max_loss_usd": round(max_loss_usd, 2),
+        "fees_slippage_usd": round(fees_slippage_usd, 2),
+        "funding_cost_usd": round(funding_cost_usd, 2),
+        "funding_settlements": params.funding_settlements,
         "potential_profit_usd": round(potential_profit_usd, 2) if potential_profit_usd is not None else None,
         "rr_ratio": round(rr_ratio, 2) if rr_ratio is not None else None,
         "warnings": warnings,
     }
 
 
-__all__ = ["RiskInput", "calculate_position"]
+__all__ = ["RiskInput", "calculate_position", "funding_settlements"]

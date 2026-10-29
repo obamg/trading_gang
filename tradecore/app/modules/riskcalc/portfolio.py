@@ -11,6 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.settings import UserSettings
 from app.models.tradelog import Trade
 
+# ponytail: fixed limits, move to UserSettings when someone wants to tune them
+MAX_CONSECUTIVE_LOSSES = 3
+MAX_TRADES_PER_DAY = 4
+
+
+def loss_streak(pnls_newest_first: list[float]) -> int:
+    """Number of losing trades in a row, counting back from the newest."""
+    n = 0
+    for p in pnls_newest_first:
+        if p >= 0:
+            break
+        n += 1
+    return n
+
 
 async def check_portfolio_risk(
     db: AsyncSession,
@@ -109,7 +123,42 @@ async def check_portfolio_risk(
             f"{daily_loss_limit_pct:.1f}% used"
         )
 
-    # 3. Max concurrent positions warning
+    # 3. Cool-down after a losing streak today, and a cap on trades per day.
+    # Placeholder trades (no real fill) are excluded like in performance.
+    today_pnls = (
+        await db.execute(
+            select(Trade.net_pnl_usd)
+            .where(
+                Trade.user_id == user_id,
+                Trade.status == "closed",
+                Trade.exit_at >= today_start,
+                Trade.net_pnl_usd.isnot(None),
+                Trade.exit_reason.is_distinct_from("external_entry"),
+            )
+            .order_by(Trade.exit_at.desc())
+        )
+    ).scalars().all()
+    streak = loss_streak([float(p) for p in today_pnls])
+    if streak >= MAX_CONSECUTIVE_LOSSES:
+        warnings.append(
+            f"BLOCKED: {streak} losses in a row today — cool-down until tomorrow (UTC)"
+        )
+
+    trades_today = (
+        await db.execute(
+            select(func.count(Trade.id)).where(
+                Trade.user_id == user_id,
+                Trade.entry_at >= today_start,
+                Trade.exit_reason.is_distinct_from("external_entry"),
+            )
+        )
+    ).scalar_one()
+    if trades_today >= MAX_TRADES_PER_DAY:
+        warnings.append(
+            f"Already {trades_today} trades today (guide: {MAX_TRADES_PER_DAY}) — overtrading risk"
+        )
+
+    # 4. Max concurrent positions warning
     if open_count >= 10:
         warnings.append(
             f"You have {open_count} open positions — consider reducing exposure"

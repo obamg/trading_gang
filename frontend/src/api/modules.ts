@@ -188,7 +188,11 @@ export interface CalcResult {
   max_loss_usd: number;
   potential_profit_usd: number | null;
   rr_ratio: number | null;
+  fees_slippage_usd: number;
+  funding_cost_usd: number;
+  funding_settlements: number;
   warnings: string[];
+  verdict: "PASS" | "BLOCK";
 }
 export interface CalcInput {
   account_balance_usd: number;
@@ -202,7 +206,8 @@ export interface CalcInput {
   symbol?: string;
   oracle_signal_id?: string;
 }
-export interface CalcHistoryRow extends CalcResult {
+export interface CalcHistoryRow
+  extends Omit<CalcResult, "fees_slippage_usd" | "funding_cost_usd" | "funding_settlements" | "verdict"> {
   symbol: string | null;
   account_balance_usd: number;
   risk_pct: number;
