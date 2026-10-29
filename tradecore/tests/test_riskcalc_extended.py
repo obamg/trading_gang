@@ -16,6 +16,9 @@ def _base(**over) -> RiskInput:
         max_leverage=10.0,
         asset_type="futures",
         side="long",
+        # Legacy sizing math: fee-free. Fees are covered in test_riskcalc_fees.py.
+        taker_fee_pct=0.0,
+        stop_slippage_pct=0.0,
     )
     defaults.update(over)
     return RiskInput(**defaults)

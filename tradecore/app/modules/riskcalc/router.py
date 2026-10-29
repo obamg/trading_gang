@@ -1,4 +1,5 @@
 """RiskCalc API."""
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -8,9 +9,11 @@ from sqlalchemy import desc, select
 
 from app.dependencies import CurrentUser, DBSession
 from app.errors import AppError
+from app.logging_config import log
 from app.models.riskcalc import RiskCalcHistory
-from app.modules.riskcalc.calculator import RiskInput, calculate_position
+from app.modules.riskcalc.calculator import RiskInput, calculate_position, funding_settlements
 from app.modules.riskcalc.portfolio import check_portfolio_risk
+from app.services import redis_service
 
 router = APIRouter(
     prefix="/riskcalc", tags=["riskcalc"],
@@ -28,10 +31,19 @@ class CalcRequest(BaseModel):
     side: str = Field(default="long")
     symbol: str | None = None
     oracle_signal_id: UUID | None = None
+    hold_hours: float = Field(default=12, gt=0, le=24 * 30)
+    taker_fee_pct: float = Field(default=0.05, ge=0, le=1)
+    stop_slippage_pct: float = Field(default=0.05, ge=0, le=5)
 
 
 @router.post("/calculate")
 async def calculate(payload: CalcRequest, user: CurrentUser, db: DBSession):
+    funding_rate = None
+    if payload.symbol and payload.asset_type == "futures":
+        try:
+            funding_rate = await redis_service.get_funding_rate(payload.symbol.upper())
+        except Exception as e:
+            log.warning("riskcalc_funding_lookup_failed", symbol=payload.symbol, err=str(e))
     try:
         result = calculate_position(
             RiskInput(
@@ -43,6 +55,10 @@ async def calculate(payload: CalcRequest, user: CurrentUser, db: DBSession):
                 max_leverage=payload.max_leverage,
                 asset_type=payload.asset_type,
                 side=payload.side,
+                taker_fee_pct=payload.taker_fee_pct,
+                stop_slippage_pct=payload.stop_slippage_pct,
+                funding_rate=funding_rate,
+                funding_settlements=funding_settlements(datetime.now(timezone.utc), payload.hold_hours),
             )
         )
     except ValueError as e:
@@ -55,6 +71,7 @@ async def calculate(payload: CalcRequest, user: CurrentUser, db: DBSession):
         account_balance=payload.account_balance_usd,
     )
     result["warnings"].extend(portfolio_warnings)
+    result["verdict"] = "BLOCK" if any(w.startswith("BLOCKED:") for w in result["warnings"]) else "PASS"
 
     row = RiskCalcHistory(
         user_id=user.id,

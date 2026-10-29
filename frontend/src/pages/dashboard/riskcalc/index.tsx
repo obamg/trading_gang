@@ -101,7 +101,12 @@ export default function RiskCalcPage() {
         </Card>
 
         <Card>
-          <CardHeader><h2 className="text-sm font-semibold">Result</h2></CardHeader>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Result</h2>
+              {result && <Badge variant={result.verdict === "PASS" ? "bullish" : "bearish"}>{result.verdict}</Badge>}
+            </div>
+          </CardHeader>
           <CardBody>
             {!result ? (
               <p className="text-sm text-textSecondary">Run a calculation to see the breakdown.</p>
@@ -114,6 +119,8 @@ export default function RiskCalcPage() {
                   <Stat label="Stop distance" value={<NumberDisplay value={result.stop_distance_pct} decimals={2} suffix="%" />} />
                   <Stat label="Leverage" value={<NumberDisplay value={result.leverage} decimals={2} suffix="x" />} />
                   <Stat label="Liquidation" value={result.liquidation_price ? <NumberDisplay value={result.liquidation_price} decimals={4} /> : "—"} />
+                  <Stat label="Fees + slippage" value={<NumberDisplay value={result.fees_slippage_usd} decimals={2} prefix="$" />} />
+                  <Stat label={`Funding (${result.funding_settlements}× in 12h)`} value={<NumberDisplay value={result.funding_cost_usd} decimals={2} prefix="$" />} />
                 </div>
 
                 <PnlBreakdown maxLoss={result.max_loss_usd} potentialProfit={result.potential_profit_usd} rrRatio={result.rr_ratio} />
