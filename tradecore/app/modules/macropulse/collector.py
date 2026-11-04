@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -216,48 +217,61 @@ def _spread(a: float | None, b: float | None) -> Decimal | None:
     return _d(float(a) - float(b))
 
 
-async def sync_economic_calendar(db: AsyncSession, api_key: str | None = None) -> int:
-    """Sync upcoming events. TradingEconomics requires an API key; gracefully no-op without it."""
-    if not api_key:
-        log.info("economic_calendar_skipped_no_key")
-        return 0
-    url = "https://api.tradingeconomics.com/calendar"
+# Free, keyless; this week only (Sun→Sat, rolls over on Sunday). Ask for it
+# politely and rarely — the 6h cadence is well inside the publisher's limits.
+FF_CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+FF_IMPACT = {"High": "high", "Medium": "medium"}
+
+
+def parse_ff_events(rows: list) -> list[dict]:
+    """US medium/high-impact rows from the ForexFactory feed, times in UTC."""
+    out = []
+    for ev in rows if isinstance(rows, list) else []:
+        impact = FF_IMPACT.get(ev.get("impact"))
+        if ev.get("country") != "USD" or impact is None:
+            continue
+        try:
+            at = datetime.fromisoformat(ev["date"]).astimezone(timezone.utc)
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append({
+            "name": (ev.get("title") or "Unknown")[:200],
+            "country": "US",
+            "impact": impact,
+            "scheduled_at": at,
+            "forecast_value": (ev.get("forecast") or None),
+            "previous_value": (ev.get("previous") or None),
+        })
+    return out
+
+
+async def sync_economic_calendar(db: AsyncSession) -> int:
+    """Insert this week's US events that aren't stored yet. Returns new rows."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(url, params={"c": api_key, "format": "json"})
+        async with httpx.AsyncClient(timeout=30.0, headers={"User-Agent": "tradecore-calendar"}) as client:
+            resp = await client.get(FF_CALENDAR_URL)
             resp.raise_for_status()
-            rows = resp.json()
+            events = parse_ff_events(resp.json())
     except Exception as e:
         log.warning("economic_calendar_failed", err=str(e))
         return 0
+    if not events:
+        log.warning("economic_calendar_empty")
+        return 0
 
-    count = 0
-    for ev in rows:
-        scheduled = ev.get("Date")
-        if not scheduled:
-            continue
-        try:
-            scheduled_at = datetime.fromisoformat(scheduled.replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if scheduled_at < datetime.now(timezone.utc) - timedelta(days=1):
-            continue
-        impact_raw = int(ev.get("Importance", 1))
-        impact = {3: "high", 2: "medium", 1: "low"}.get(impact_raw, "low")
-        stmt = pg_insert(EconomicEvent).values(
-            name=ev.get("Event", "Unknown"),
-            category=ev.get("Category"),
-            country=(ev.get("Country") or "US")[:10],
-            impact=impact,
-            scheduled_at=scheduled_at,
-            forecast_value=str(ev.get("Forecast") or "") or None,
-            previous_value=str(ev.get("Previous") or "") or None,
-        ).on_conflict_do_nothing()
-        await db.execute(stmt)
-        count += 1
+    # No unique constraint on the table, so dedupe on (name, time) here.
+    times = [e["scheduled_at"] for e in events]
+    existing = set(
+        (await db.execute(
+            select(EconomicEvent.name, EconomicEvent.scheduled_at)
+            .where(EconomicEvent.scheduled_at.between(min(times), max(times)))
+        )).all()
+    )
+    new = [e for e in events if (e["name"], e["scheduled_at"]) not in existing]
+    db.add_all(EconomicEvent(**e) for e in new)
     await db.commit()
-    log.info("economic_calendar_synced", count=count)
-    return count
+    log.info("economic_calendar_synced", fetched=len(events), new=len(new))
+    return len(new)
 
 
 # ---------- scheduler wrappers ----------
@@ -281,8 +295,7 @@ async def run_daily_snapshot() -> None:
 async def run_calendar_sync() -> None:
     async with AsyncSessionLocal() as db:
         try:
-            from app.config import settings as _s
-            await sync_economic_calendar(db, getattr(_s, "trading_economics_api_key", None))
+            await sync_economic_calendar(db)
         except Exception as e:
             log.error("macropulse_calendar_failed", err=str(e))
 

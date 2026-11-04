@@ -58,3 +58,13 @@ def test_telegram_card_says_why():
     assert "SOLUSDT" in text and "long bias" in text
     assert "sentimentpulse, divergence, whaleradar" in text
     assert "p97" in text and "not advice" in text
+
+
+def test_macro_gate_holds_alert_not_signal():
+    from app.modules.oracle.engine import macro_blocks_alert
+
+    closed = {"can_trade": False, "reason": "High-impact event in <1h: CPI m/m at 13:30 UTC"}
+    assert macro_blocks_alert(closed, 60) == "macro gate: High-impact event in <1h: CPI m/m at 13:30 UTC"
+    assert macro_blocks_alert(closed, -74) is not None
+    assert macro_blocks_alert(closed, -75) is None      # strong enough to page through
+    assert macro_blocks_alert({"can_trade": True}, 10) is None
