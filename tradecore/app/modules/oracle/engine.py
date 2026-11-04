@@ -502,6 +502,19 @@ def should_alert(
     return True, f"|score| {a} >= floor (warmup n={len(trailing_abs_scores)} < {min_sample})"
 
 
+MACRO_GATE_OVERRIDE_SCORE = 75
+
+
+def macro_blocks_alert(gate: dict, score: int) -> str | None:
+    """Reason to hold back an alert under a closed macro gate, else None.
+
+    A signal strong enough (|score| >= 75) still pages through the gate.
+    """
+    if gate.get("can_trade", True) or abs(int(score)) >= MACRO_GATE_OVERRIDE_SCORE:
+        return None
+    return f"macro gate: {gate.get('reason') or 'closed'}"
+
+
 def agreeing_modules(breakdown: dict, score: int) -> list[str]:
     """Modules whose direction matches the signal and actually contributed."""
     want = "bullish" if score > 0 else "bearish" if score < 0 else None
@@ -635,11 +648,10 @@ async def generate_signal(
         log.warning("oracle_signal_no_price", symbol=sym)
         return None
 
-    # Macro gate: suppress weak signals during unfavorable conditions
+    # Macro gate (VIX extreme, high-impact event <1h) is checked here but only
+    # applied to the alert below: the signal is always recorded, so the eval
+    # data has no holes exactly around the events we want to study.
     gate = await check_macro_gates()
-    if not gate["can_trade"] and abs(int(live["score"])) < 75:
-        log.info("oracle_signal_suppressed_macro", symbol=sym, reason=gate.get("reason"))
-        return None
 
     # Trade params only make sense for directional recs
     direction = (
@@ -725,6 +737,8 @@ async def generate_signal(
         percentile=app_settings.oracle_alert_percentile,
         min_sample=app_settings.oracle_alert_min_sample,
     )
+    if ok and (blocked := macro_blocks_alert(gate, score_i)):
+        ok, why = False, blocked
     if ok and await redis_service.is_on_cooldown("oracle", sym):
         ok, why = False, "symbol on cooldown"
     if ok:

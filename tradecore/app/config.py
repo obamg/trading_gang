@@ -109,7 +109,6 @@ class Settings(BaseSettings):
     # app/services/cmc_client.py for the credit accounting and the
     # cmc_not_entitled log event that reveals per-endpoint plan gating.
     cmc_api_key: str = ""
-    trading_economics_api_key: str = ""
     santiment_api_key: str = ""
     # Santiment plan time restriction. SANAPI FREE only serves data older than
     # ~30d (and newer than 1y) and rejects the whole query if `to` is past that

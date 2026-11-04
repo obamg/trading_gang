@@ -194,7 +194,8 @@ def start_scheduler() -> AsyncIOScheduler:
     sched.add_job(
         macropulse_collector.run_calendar_sync,
         "interval",
-        hours=24,
+        hours=6,
+        next_run_time=datetime.now(timezone.utc),  # fill the calendar on boot
         id="macro_calendar",
         coalesce=True,
         max_instances=1,

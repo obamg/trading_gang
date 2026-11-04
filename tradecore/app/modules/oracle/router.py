@@ -10,6 +10,7 @@ from app.dependencies import CurrentUser, DBSession
 from app.errors import AppError
 from app.models.oracle import OracleOutcome, OracleSignal
 from app.models.settings import UserSettings
+from app.modules.oracle import events as oracle_events
 from app.modules.oracle.board import get_cached_board, rank_picks
 from app.modules.oracle.engine import DEFAULT_WEIGHTS, compute_live_score, generate_signal
 
@@ -213,13 +214,20 @@ async def picks(
 
     snapshot = await get_cached_board()
     empty = _outcome_stats(0, None, None)
+    # Warn-only: events tag picks, they never move a score.
+    upcoming = await oracle_events.upcoming_events(db, now)
+    in_window = [oracle_events.serialize(e) for e in oracle_events.in_window(upcoming, now)]
+    ranked = rank_picks(snapshot, buckets, limit) if snapshot else []
     return {
         "track_record": {
             "days": TRACK_RECORD_DAYS,
             "alerted": record.get(True, empty),
             "others": record.get(False, empty),
         },
-        "picks": rank_picks(snapshot, buckets, limit) if snapshot else [],
+        "picks": [{**p, "events_in_window": in_window} for p in ranked],
+        "events": [oracle_events.serialize(e) for e in upcoming],
+        "events_horizon_hours": oracle_events.EVENTS_HORIZON_HOURS,
+        "pick_window_hours": oracle_events.PICK_WINDOW_HOURS,
         "similar_lookback_days": SIMILAR_LOOKBACK_DAYS,
         "updated_at": snapshot.get("updated_at") if snapshot else None,
         "stale": snapshot is None,

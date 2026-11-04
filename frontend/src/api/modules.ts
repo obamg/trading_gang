@@ -320,13 +320,23 @@ export interface OracleOutcomeStats {
   hit_4h_pct: number | null;
   avg_move_4h_pct: number | null;
 }
+export interface OracleEvent {
+  name: string;
+  kind: "macro" | "options";
+  impact: "high" | "medium";
+  scheduled_at: string;
+}
 export interface OraclePick extends OracleBoardRow {
   similar: OracleOutcomeStats;
+  events_in_window: OracleEvent[];
 }
 export interface OraclePicksResponse {
   track_record: { days: number; alerted: OracleOutcomeStats; others: OracleOutcomeStats };
   picks: OraclePick[];
   similar_lookback_days: number;
+  events: OracleEvent[];
+  events_horizon_hours: number;
+  pick_window_hours: number;
   updated_at: string | null;
   stale: boolean;
 }

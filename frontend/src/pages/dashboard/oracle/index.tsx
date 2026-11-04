@@ -14,6 +14,7 @@ import {
   oracleApi,
   type LiveOracle,
   type OracleBoardRow,
+  type OracleEvent,
   type OracleOutcomeStats,
   type OraclePick,
   type OracleSignal,
@@ -80,6 +81,33 @@ function pct(v: number | null, sign = false) {
   return `${sign && v > 0 ? "+" : ""}${v.toFixed(sign ? 2 : 0)}%`;
 }
 
+function countdown(iso: string) {
+  const mins = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60_000));
+  if (mins < 60) return `in ${mins}m`;
+  const h = Math.floor(mins / 60);
+  return h < 24 ? `in ${h}h ${mins % 60}m` : `in ${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+function EventsBar({ events, horizon, windowHours }: { events: OracleEvent[]; horizon: number; windowHours: number }) {
+  const soon = (e: OracleEvent) => new Date(e.scheduled_at).getTime() - Date.now() < windowHours * 3_600_000;
+  const alarm = events.some((e) => e.impact === "high" && soon(e));
+  return (
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border px-3 py-2 text-xs sm:text-sm ${alarm ? "border-loss/60 bg-loss/10" : "border-borderSubtle bg-bgElevated"}`}>
+      <span className="font-semibold">{alarm ? "⚠ Event risk" : "Incoming events"}</span>
+      {events.length === 0 ? (
+        <span className="text-textSecondary">Nothing high or medium impact in the next {horizon}h.</span>
+      ) : (
+        events.map((e) => (
+          <span key={e.name + e.scheduled_at} className={e.impact === "high" ? "text-textPrimary" : "text-textSecondary"} title={new Date(e.scheduled_at).toUTCString()}>
+            <span className={e.impact === "high" ? "text-loss" : "text-warning"}>●</span> {e.name}{" "}
+            <span className="text-textMuted">{countdown(e.scheduled_at)}</span>
+          </span>
+        ))
+      )}
+    </div>
+  );
+}
+
 function TopPicksView({ onOpen }: { onOpen: (symbol: string) => void }) {
   const nav = useNavigate();
   const { data, isLoading } = useQuery({
@@ -92,6 +120,7 @@ function TopPicksView({ onOpen }: { onOpen: (symbol: string) => void }) {
   return (
     <div className="flex flex-col gap-4 md:gap-6">
       {data ? <TrackRecord days={data.track_record.days} alerted={data.track_record.alerted} others={data.track_record.others} /> : <Skeleton className="h-14" />}
+      {data && <EventsBar events={data.events} horizon={data.events_horizon_hours} windowHours={data.pick_window_hours} />}
 
       <Card>
         <CardHeader>
@@ -165,6 +194,12 @@ function PickRow({ rank, pick, onOpen, onTrade }: { rank: number; pick: OraclePi
             <span key={m.name} className="rounded bg-bgSecondary px-2 py-0.5 text-[10px] capitalize text-textSecondary">{m.name}</span>
           ))}
         </div>
+        {pick.events_in_window.length > 0 && (
+          <span className="rounded bg-loss/15 px-2 py-0.5 text-[10px] font-semibold text-loss" title={pick.events_in_window.map((e) => e.name).join(", ")}>
+            ⚠ {pick.events_in_window[0].name} {countdown(pick.events_in_window[0].scheduled_at)}
+            {pick.events_in_window.length > 1 ? ` +${pick.events_in_window.length - 1}` : ""}
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-3 text-xs">
         <span className="text-textMuted" title="Measured Oracle signals in the same score band">
