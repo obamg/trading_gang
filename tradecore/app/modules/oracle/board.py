@@ -158,6 +158,22 @@ async def get_cached_board() -> dict | None:
         return None
 
 
+def score_bucket(score: int) -> int:
+    """|score| rounded down to the nearest 10 — the "signals like this" key."""
+    return abs(int(score)) // 10 * 10
+
+
+def rank_picks(snapshot: dict, buckets: dict[int, dict], limit: int) -> list[dict]:
+    """Strongest board rows, both directions, each with its score bucket's record."""
+    rows = [*snapshot.get("bullish", []), *snapshot.get("bearish", [])]
+    rows.sort(key=lambda r: abs(int(r.get("score") or 0)), reverse=True)
+    empty = {"n": 0, "hit_4h_pct": None, "avg_move_4h_pct": None}
+    return [
+        {**r, "similar": buckets.get(score_bucket(r.get("score") or 0), empty)}
+        for r in rows[:limit]
+    ]
+
+
 async def run_board_job() -> None:
     """Scheduler entrypoint. Swallows + logs exceptions per project convention."""
     try:
@@ -175,7 +191,9 @@ async def run_board_job() -> None:
 __all__ = [
     "compute_board",
     "get_cached_board",
+    "rank_picks",
     "run_board_job",
+    "score_bucket",
     "BOARD_CACHE_KEY",
     "MIN_MODULES",
     "INTENSITY_FLOOR",

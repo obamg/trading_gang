@@ -1,11 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { MetricCard } from "@/components/ui/MetricCard";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Tabs } from "@/components/ui/Tabs";
@@ -15,10 +14,15 @@ import {
   oracleApi,
   type LiveOracle,
   type OracleBoardRow,
+  type OracleOutcomeStats,
+  type OraclePick,
   type OracleSignal,
 } from "@/api/modules";
 
-type TabKey = "symbol" | "board";
+type TabKey = "picks" | "symbol" | "board";
+
+// Below this many measured signals a hit rate is noise — say "too few".
+const MIN_SAMPLE = 20;
 
 const RECOMMENDATION_META: Record<string, { color: string; label: string }> = {
   strong_long: { color: "text-profit", label: "STRONG LONG" },
@@ -31,7 +35,8 @@ const RECOMMENDATION_META: Record<string, { color: string; label: string }> = {
 };
 
 export default function OraclePage() {
-  const [tab, setTab] = useState<TabKey>("symbol");
+  const [tab, setTab] = useState<TabKey>("picks");
+  const [symbol, setSymbol] = useState("BTCUSDT");
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">
@@ -47,6 +52,7 @@ export default function OraclePage() {
 
       <Tabs
         tabs={[
+          { key: "picks", label: "Top Picks" },
           { key: "symbol", label: "Per-Symbol Analysis" },
           { key: "board", label: "Confluence Board" },
         ]}
@@ -54,19 +60,134 @@ export default function OraclePage() {
         onChange={(k) => setTab(k as TabKey)}
       />
 
-      {tab === "symbol" ? <PerSymbolView /> : <ConfluenceBoardView />}
+      {tab === "picks" && (
+        <TopPicksView onOpen={(sym) => { setSymbol(sym); setTab("symbol"); }} />
+      )}
+      {tab === "symbol" && <PerSymbolView key={symbol} initialSymbol={symbol} />}
+      {tab === "board" && <ConfluenceBoardView />}
     </div>
   );
 }
 
-// ---------- per-symbol view (existing behavior, unchanged) ----------
+// ---------- top picks view ----------
 
-function PerSymbolView() {
+function tradeUrl(symbol: string, entry: number | null | undefined) {
+  return `/riskcalc?symbol=${symbol}${entry ? `&entry=${entry}` : ""}`;
+}
+
+function pct(v: number | null, sign = false) {
+  if (v === null) return "—";
+  return `${sign && v > 0 ? "+" : ""}${v.toFixed(sign ? 2 : 0)}%`;
+}
+
+function TopPicksView({ onOpen }: { onOpen: (symbol: string) => void }) {
   const nav = useNavigate();
-  const [symbol, setSymbol] = useState("BTCUSDT");
+  const { data, isLoading } = useQuery({
+    queryKey: ["oracle", "picks"],
+    queryFn: () => oracleApi.picks(10),
+    refetchInterval: 60_000,
+  });
+  const updated = data?.updated_at ? new Date(data.updated_at) : null;
+
+  return (
+    <div className="flex flex-col gap-4 md:gap-6">
+      {data ? <TrackRecord days={data.track_record.days} alerted={data.track_record.alerted} others={data.track_record.others} /> : <Skeleton className="h-14" />}
+
+      <Card>
+        <CardHeader>
+          <div className="flex w-full items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">Best setups right now</h2>
+            <LastUpdated date={updated} label="Snapshot" />
+          </div>
+        </CardHeader>
+        <CardBody className="flex flex-col gap-2">
+          {isLoading ? (
+            <Skeleton className="h-48" />
+          ) : data?.stale ? (
+            <p className="text-sm text-textSecondary">No snapshot yet — the scheduler refreshes every 3 min. Check back shortly.</p>
+          ) : (data?.picks ?? []).length === 0 ? (
+            <p className="text-sm text-textSecondary">Nothing has 3+ modules agreeing right now. No trade is a valid answer.</p>
+          ) : (
+            data!.picks.map((p, i) => (
+              <PickRow key={p.symbol} rank={i + 1} pick={p} onOpen={() => onOpen(p.symbol)} onTrade={() => nav(tradeUrl(p.symbol, p.current_price))} />
+            ))
+          )}
+          <p className="mt-1 text-xs text-textMuted">
+            "Like this" = every measured Oracle signal in the same score band (±10) over the last {data?.similar_lookback_days ?? 30} days, judged at 4h.
+          </p>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+function TrackRecord({ days, alerted, others }: { days: number; alerted: OracleOutcomeStats; others: OracleOutcomeStats }) {
+  const judged = alerted.n >= MIN_SAMPLE && alerted.hit_4h_pct !== null && others.hit_4h_pct !== null;
+  // Harness Eval A: alerts must beat the rest by 5+ points and on average move.
+  const beating = judged
+    && alerted.hit_4h_pct! - others.hit_4h_pct! >= 5
+    && (alerted.avg_move_4h_pct ?? 0) > (others.avg_move_4h_pct ?? 0);
+  const verdict = !judged
+    ? { text: `Too few alerts to judge (n=${alerted.n})`, variant: "neutral" as const }
+    : beating
+      ? { text: "Alerts beating the rest", variant: "bullish" as const }
+      : { text: "Alerts NOT beating the rest", variant: "warning" as const };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-borderSubtle bg-bgElevated px-3 py-2 text-xs sm:text-sm">
+      <span className="font-semibold">Last {days} days</span>
+      <Badge variant={verdict.variant}>{verdict.text}</Badge>
+      <span className="text-textSecondary">Alerts: <b className="text-textPrimary">{alerted.n}</b></span>
+      <span className="text-textSecondary">
+        Won 4h: <b className="text-textPrimary">{pct(alerted.hit_4h_pct)}</b> vs {pct(others.hit_4h_pct)} for the rest
+      </span>
+      <span className="text-textSecondary">
+        Avg move: <b className="text-textPrimary">{pct(alerted.avg_move_4h_pct, true)}</b> vs {pct(others.avg_move_4h_pct, true)}
+      </span>
+    </div>
+  );
+}
+
+function PickRow({ rank, pick, onOpen, onTrade }: { rank: number; pick: OraclePick; onOpen: () => void; onTrade: () => void }) {
+  const long = pick.score > 0;
+  const s = pick.similar;
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-borderSubtle bg-bgElevated px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <span className="w-5 text-xs text-textMuted tabular-nums">{rank}</span>
+        <button type="button" onClick={onOpen} className="font-semibold hover:underline" title="Open per-symbol analysis">
+          {pick.symbol}
+        </button>
+        <span className={`text-xs font-bold ${long ? "text-profit" : "text-loss"}`}>{long ? "LONG" : "SHORT"}</span>
+        <span className={`text-sm font-bold tabular-nums ${long ? "text-profit" : "text-loss"}`}>{long ? "+" : ""}{pick.score}</span>
+        <div className="flex flex-wrap gap-1">
+          {pick.modules.map((m) => (
+            <span key={m.name} className="rounded bg-bgSecondary px-2 py-0.5 text-[10px] capitalize text-textSecondary">{m.name}</span>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-3 text-xs">
+        <span className="text-textMuted" title="Measured Oracle signals in the same score band">
+          {s.n >= MIN_SAMPLE ? (
+            <>Like this: <b className="text-textPrimary">{pct(s.hit_4h_pct)}</b> won · {pct(s.avg_move_4h_pct, true)} · n={s.n}</>
+          ) : (
+            <>Like this: too few (n={s.n})</>
+          )}
+        </span>
+        <Button size="sm" variant="secondary" onClick={onTrade}>Trade</Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- per-symbol view ----------
+
+function PerSymbolView({ initialSymbol }: { initialSymbol: string }) {
+  const nav = useNavigate();
+  const [symbol, setSymbol] = useState(initialSymbol);
   const [pending, setPending] = useState(symbol);
 
-  const { data: live, isLoading: liveLoading, refetch: refetchLive } = useQuery({
+  const { data: live, isLoading: liveLoading } = useQuery({
     queryKey: ["oracle", "live", symbol],
     queryFn: () => oracleApi.live(symbol),
     refetchInterval: 30000,
@@ -74,11 +195,6 @@ function PerSymbolView() {
   const { data: signals } = useQuery({
     queryKey: ["oracle", "signals"],
     queryFn: () => oracleApi.signals({ limit: 20 }),
-  });
-  const { data: perf } = useQuery({ queryKey: ["oracle", "perf"], queryFn: oracleApi.performance });
-  const gen = useMutation({
-    mutationFn: () => oracleApi.generate(symbol, true),
-    onSuccess: () => refetchLive(),
   });
 
   const lastUpdated = useMemo(() => {
@@ -98,9 +214,6 @@ function PerSymbolView() {
       >
         <Input label="Symbol" value={pending} onChange={(e) => setPending(e.target.value)} className="w-full sm:w-48" />
         <Button type="submit" variant="secondary">Analyze</Button>
-        <Button type="button" onClick={() => gen.mutate()} disabled={gen.isPending}>
-          {gen.isPending ? "Generating…" : "Generate signal"}
-        </Button>
       </form>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -118,13 +231,6 @@ function PerSymbolView() {
         </Card>
       </div>
 
-      <section className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
-        <MetricCard label="Signals generated" value={perf?.total_signals ?? null} valueDecimals={0} />
-        <MetricCard label="1h accuracy" value={perf?.accuracy_1h_pct ?? null} valueSuffix="%" valueDecimals={1} />
-        <MetricCard label="4h accuracy" value={perf?.accuracy_4h_pct ?? null} valueSuffix="%" valueDecimals={1} />
-        <MetricCard label="Measured (4h)" value={perf?.measured_4h ?? null} valueDecimals={0} />
-      </section>
-
       <Card>
         <CardHeader><h2 className="text-sm font-semibold">Recent signals</h2></CardHeader>
         <CardBody className="flex flex-col gap-2">
@@ -132,7 +238,7 @@ function PerSymbolView() {
             <p className="text-sm text-textSecondary">No signals generated yet.</p>
           ) : (
             (signals?.items ?? []).map((s) => (
-              <SignalRow key={s.id} s={s} onTrade={() => nav(`/riskcalc?symbol=${s.symbol}${s.entry_price ? `&entry=${s.entry_price}` : ""}`)} />
+              <SignalRow key={s.id} s={s} onTrade={() => nav(tradeUrl(s.symbol, s.entry_price))} />
             ))
           )}
         </CardBody>

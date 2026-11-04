@@ -204,3 +204,21 @@ async def test_snapshot_cached_in_redis(patched_board, fake_redis):
 async def test_get_cached_board_returns_none_on_miss(fake_redis):
     # No prior compute_board call → key absent → None.
     assert await board_module.get_cached_board() is None
+
+
+# ---------- rank_picks (Top picks tab) ----------
+
+
+def test_rank_picks_merges_sides_by_abs_score_and_attaches_bucket():
+    from app.modules.oracle.board import rank_picks, score_bucket
+
+    assert score_bucket(-71) == 70 and score_bucket(69) == 60 and score_bucket(5) == 0
+    snapshot = {
+        "bullish": [{"symbol": "A", "score": 64}, {"symbol": "B", "score": 78}],
+        "bearish": [{"symbol": "C", "score": -71}],
+    }
+    buckets = {70: {"n": 44, "hit_4h_pct": 61.0, "avg_move_4h_pct": 0.2}}
+    picks = rank_picks(snapshot, buckets, limit=2)
+    assert [p["symbol"] for p in picks] == ["B", "C"]
+    assert picks[0]["similar"]["n"] == 44 and picks[1]["similar"]["n"] == 44
+    assert rank_picks(snapshot, {}, limit=10)[2]["similar"]["n"] == 0
