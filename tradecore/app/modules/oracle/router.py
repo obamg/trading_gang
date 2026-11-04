@@ -1,15 +1,16 @@
 """Oracle API."""
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import Integer, cast, desc, func, select
 
 from app.dependencies import CurrentUser, DBSession
 from app.errors import AppError
 from app.models.oracle import OracleOutcome, OracleSignal
 from app.models.settings import UserSettings
-from app.modules.oracle.board import get_cached_board
+from app.modules.oracle.board import get_cached_board, rank_picks
 from app.modules.oracle.engine import DEFAULT_WEIGHTS, compute_live_score, generate_signal
 
 router = APIRouter(
@@ -164,6 +165,64 @@ async def board(
         "stale": False,
         "min_modules": snapshot.get("min_modules", 3),
         "universe_size": snapshot.get("universe_size"),
+    }
+
+
+TRACK_RECORD_DAYS = 7
+SIMILAR_LOOKBACK_DAYS = 30
+
+
+def _outcome_stats(n, hit, move) -> dict:
+    return {
+        "n": int(n or 0),
+        "hit_4h_pct": round(float(hit) * 100, 1) if hit is not None else None,
+        "avg_move_4h_pct": round(float(move), 3) if move is not None else None,
+    }
+
+
+@router.get("/picks")
+async def picks(
+    _user: CurrentUser,
+    db: DBSession,
+    limit: int = Query(default=10, ge=1, le=10),
+):
+    """Top board setups right now, plus how Oracle's alerts have actually done.
+
+    Moves are directional (sign(score) × raw 4h move), so +0.2 means the
+    call was right by 0.2%. Alerts are judged against the non-alerted
+    signals from the same window, never against zero — a rally flatters
+    every long (see docs/ORACLE_SIGNAL_HARNESS.md, Eval A).
+    """
+    now = datetime.now(timezone.utc)
+    hit = func.avg(cast(OracleOutcome.was_correct_4h, Integer))
+    move = func.avg(func.sign(OracleSignal.score) * OracleOutcome.pnl_4h_pct)
+
+    async def _grouped(key, days: int) -> dict:
+        stmt = (
+            select(key.label("k"), func.count().label("n"), hit.label("hit"), move.label("move"))
+            .join(OracleOutcome, OracleOutcome.signal_id == OracleSignal.id)
+            .where(OracleOutcome.was_correct_4h.isnot(None))
+            .where(OracleSignal.signal_at >= now - timedelta(days=days))
+            .group_by(key)
+        )
+        return {r.k: _outcome_stats(r.n, r.hit, r.move) for r in await db.execute(stmt)}
+
+    record = await _grouped(OracleSignal.alerted, TRACK_RECORD_DAYS)
+    # Integer division in Postgres; must match board.score_bucket.
+    buckets = await _grouped(func.abs(OracleSignal.score) // 10 * 10, SIMILAR_LOOKBACK_DAYS)
+
+    snapshot = await get_cached_board()
+    empty = _outcome_stats(0, None, None)
+    return {
+        "track_record": {
+            "days": TRACK_RECORD_DAYS,
+            "alerted": record.get(True, empty),
+            "others": record.get(False, empty),
+        },
+        "picks": rank_picks(snapshot, buckets, limit) if snapshot else [],
+        "similar_lookback_days": SIMILAR_LOOKBACK_DAYS,
+        "updated_at": snapshot.get("updated_at") if snapshot else None,
+        "stale": snapshot is None,
     }
 
 

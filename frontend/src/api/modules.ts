@@ -293,8 +293,7 @@ export const oracleApi = {
     http.get<Paginated<OracleSignal>>("/oracle/signals", { params }).then((r) => r.data),
   detail: (id: string) => http.get<OracleSignal>(`/oracle/signals/${id}`).then((r) => r.data),
   live: (symbol: string) => http.get<LiveOracle>(`/oracle/live/${symbol}`).then((r) => r.data),
-  generate: (symbol: string, persist = true) => http.post<OracleSignal>("/oracle/generate", { symbol, persist }).then((r) => r.data),
-  performance: () => http.get<{ total_signals: number; measured_1h: number; measured_4h: number; accuracy_1h_pct: number | null; accuracy_4h_pct: number | null }>("/oracle/performance").then((r) => r.data),
+  picks: (limit = 10) => http.get<OraclePicksResponse>("/oracle/picks", { params: { limit } }).then((r) => r.data),
   updateSettings: (body: Record<string, unknown>) => http.post("/oracle/settings", body).then((r) => r.data),
   board: (params?: { direction?: "bullish" | "bearish"; min_modules?: number; min_score?: number }) =>
     http.get<OracleBoardResponse>("/oracle/board", { params }).then((r) => r.data),
@@ -315,6 +314,21 @@ export interface OracleBoardRow {
   agreeing_count: number;
   current_price: number | null;
   modules: OracleBoardModule[];
+}
+export interface OracleOutcomeStats {
+  n: number;
+  hit_4h_pct: number | null;
+  avg_move_4h_pct: number | null;
+}
+export interface OraclePick extends OracleBoardRow {
+  similar: OracleOutcomeStats;
+}
+export interface OraclePicksResponse {
+  track_record: { days: number; alerted: OracleOutcomeStats; others: OracleOutcomeStats };
+  picks: OraclePick[];
+  similar_lookback_days: number;
+  updated_at: string | null;
+  stale: boolean;
 }
 export interface OracleBoardResponse {
   bullish: OracleBoardRow[];
