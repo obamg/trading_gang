@@ -61,7 +61,7 @@ function Hero() {
           Trade with an <span className="text-accent">edge</span>.
         </h1>
         <p className="mx-auto mb-8 max-w-2xl text-lg text-textSecondary">
-          Ten connected modules watch the market so you don't have to — volume spikes,
+          {MODULES.length} connected modules watch the market so you don't have to — volume spikes,
           whale flows, liquidation maps, macro context, and a meta-Oracle that scores
           every opportunity from -100 to +100.
         </p>
@@ -93,13 +93,18 @@ const MODULE_BLURBS: Record<string, string> = {
   riskcalc: "Size every trade correctly before you click — no more guessing.",
   performancecore: "Win rate, expectancy, drawdown — brutal honesty on demand.",
   oracle: "Six modules voting on every setup, scored and sorted for you.",
+  flowpulse: "Order book imbalance, taker buy/sell pressure, and what top traders are holding.",
+  newspulse: "Market-moving headlines matched to the coins they hit, as they break.",
+  walletwatch: "Labeled smart-money wallets swapping on ETH, BSC, Arbitrum, Base and Solana.",
+  listingwatch: "New exchange listings caught the moment they appear.",
+  wavewatch: "Innovation Zone coins coiling before a wave — and the cascade when it hits.",
 };
 
 function ModulesShowcase() {
   return (
     <section id="modules" className="border-b border-borderSubtle">
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 md:py-20">
-        <h2 className="mb-3 text-center text-3xl font-bold">All ten modules, one cockpit</h2>
+        <h2 className="mb-3 text-center text-3xl font-bold">All {MODULES.length} modules, one cockpit</h2>
         <p className="mx-auto mb-12 max-w-2xl text-center text-textSecondary">
           Each module is specialised, fast, and opinionated. They don't just stream data —
           they emit signals. Oracle stitches them together.
@@ -134,7 +139,7 @@ function ModulesShowcase() {
 function HowItWorks() {
   const steps = [
     { n: 1, title: "Connect", body: "Link your exchange with read-only keys. We never trade for you." },
-    { n: 2, title: "Monitor", body: "Real-time alerts across ten modules — desktop, Telegram, or WebSocket feed." },
+    { n: 2, title: "Monitor", body: `Real-time alerts across ${MODULES.length} modules — desktop, Telegram, or WebSocket feed.` },
     { n: 3, title: "Decide", body: "Oracle aggregates every module into a single score. Trade only when confluence agrees." },
   ];
   return (
@@ -172,7 +177,7 @@ const PLANS = [
     name: "Pro",
     price: "$29",
     cadence: "per month",
-    features: ["All 10 modules", "Unlimited alerts", "Oracle signal history", "Priority data feeds", "Telegram + email alerts"],
+    features: [`All ${MODULES.length} modules`, "Unlimited alerts", "Oracle signal history", "Priority data feeds", "Telegram + email alerts"],
     cta: "Get Pro",
     href: "/register?plan=pro",
     highlight: true,
