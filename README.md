@@ -1,8 +1,8 @@
 # TradeCore
 
-Pro-grade crypto intelligence platform. Ten specialised modules (RadarX, WhaleRadar,
-LiquidMap, SentimentPulse, MacroPulse, GemRadar, RiskCalc, TradeLog, PerformanceCore,
-Oracle) feeding a meta-scorer that ranks every setup from −100 to +100.
+Pro-grade crypto intelligence platform. Specialised modules (RadarX, WhaleRadar,
+LiquidMap, SentimentPulse, MacroPulse, RiskCalc, TradeLog, PerformanceCore, Oracle,
+and more) feeding a meta-scorer that ranks every setup from −100 to +100.
 
 ---
 

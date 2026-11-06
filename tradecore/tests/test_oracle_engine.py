@@ -1,11 +1,10 @@
-"""Extended Oracle engine tests — weight normalization, GemRadar signal, ATR, trade params."""
+"""Extended Oracle engine tests — weight normalization, ATR, trade params."""
 from __future__ import annotations
 
 import pytest
 
 from app.modules.oracle.engine import (
     DEFAULT_WEIGHTS,
-    MAJOR_SYMBOLS,
     _atr_from_candles,
     _clip01,
     _confidence,
@@ -74,7 +73,7 @@ def test_weight_normalization_with_zero_weights():
 
 def test_weight_normalization_unequal():
     """Unequal weights should still normalize to 100."""
-    custom = {"macropulse": 100, "whaleradar": 100, "radarx": 0, "liquidmap": 0, "sentimentpulse": 0, "gemradar": 0}
+    custom = {"macropulse": 100, "whaleradar": 100, "radarx": 0, "liquidmap": 0, "sentimentpulse": 0}
     raw_sum = sum(custom.values())  # 200
     scale = 100.0 / raw_sum
     total_score = 0.0
@@ -98,7 +97,7 @@ def test_full_bullish_score_reaches_100():
 
 def test_partial_modules_still_reach_extremes():
     """Even with only 3 modules active at full intensity, normalization should use full range."""
-    weights = {"macropulse": 25, "whaleradar": 20, "radarx": 15, "liquidmap": 0, "sentimentpulse": 0, "gemradar": 0}
+    weights = {"macropulse": 25, "whaleradar": 20, "radarx": 15, "liquidmap": 0, "sentimentpulse": 0}
     raw_sum = sum(weights.values())  # 60
     scale = 100.0 / raw_sum
     score = 0.0
@@ -141,19 +140,6 @@ def test_atr_handles_invalid_data():
 
 
 # ---------- major symbols ----------
-
-def test_major_symbols_include_top_coins():
-    assert "BTCUSDT" in MAJOR_SYMBOLS
-    assert "ETHUSDT" in MAJOR_SYMBOLS
-    assert "SOLUSDT" in MAJOR_SYMBOLS
-
-
-def test_gemradar_skipped_for_majors():
-    """GemRadar should return neutral for major symbols."""
-    # This verifies the guard in _gemradar_signal
-    assert "BTCUSDT" in MAJOR_SYMBOLS
-    assert "RANDOMTOKEN" not in MAJOR_SYMBOLS
-
 
 # ---------- recommendation thresholds ----------
 

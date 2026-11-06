@@ -22,8 +22,6 @@ class SettingsResponse(BaseModel):
     radarx_cooldown_minutes: int = 30
     whaleradar_min_trade_usd: float = 300_000
     whaleradar_min_onchain_usd: float = 500_000
-    gemradar_min_mcap_usd: float = 1_000_000
-    gemradar_max_mcap_usd: float = 100_000_000
     oracle_min_score: int = 65
     oracle_min_confluence: int = 4
 
@@ -36,8 +34,6 @@ class SettingsUpdate(BaseModel):
     radarx_cooldown_minutes: int | None = None
     whaleradar_min_trade_usd: float | None = None
     whaleradar_min_onchain_usd: float | None = None
-    gemradar_min_mcap_usd: float | None = None
-    gemradar_max_mcap_usd: float | None = None
     oracle_min_score: int | None = None
     oracle_min_confluence: int | None = None
 
@@ -67,8 +63,6 @@ async def get_settings(user: CurrentUser, db: DBSession):
         radarx_cooldown_minutes=us.radarx_cooldown_minutes,
         whaleradar_min_trade_usd=float(us.whaleradar_min_trade_usd),
         whaleradar_min_onchain_usd=float(us.whaleradar_min_onchain_usd),
-        gemradar_min_mcap_usd=float(us.gemradar_min_mcap_usd),
-        gemradar_max_mcap_usd=float(us.gemradar_max_mcap_usd),
         oracle_min_score=us.oracle_min_score,
         oracle_min_confluence=us.oracle_min_confluence,
     )

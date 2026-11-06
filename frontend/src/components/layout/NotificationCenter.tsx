@@ -7,7 +7,6 @@ const MODULE_COLORS: Record<string, string> = {
   radarx: "#f59e0b",
   whaleradar: "#3b82f6",
   liquidmap: "#ef4444",
-  gemradar: "#8b5cf6",
   oracle: "#10b981",
   sentimentpulse: "#6366f1",
   macropulse: "#ec4899",
@@ -37,8 +36,6 @@ function AlertRow({ alert }: { alert: AlertEvent }) {
     detail = data.type === "oi_surge"
       ? `OI ${usd > 0 ? "+" : ""}${usd.toFixed(1)}%`
       : `$${(usd / 1000).toFixed(0)}K ${data.side ?? ""}`;
-  } else if (module === "gemradar") {
-    detail = `MCap $${((Number(data.market_cap_usd) || 0) / 1e6).toFixed(1)}M`;
   } else if (module === "oracle") {
     detail = `Score: ${data.score ?? "?"}`;
   } else if (module === "liquidmap") {

@@ -402,14 +402,6 @@ class TelegramService:
                     f"Chain: `{d.get('chain', '?')}`"
                 )
 
-        if module == "gemradar":
-            return (
-                f"💎 *GemRadar — {sym}*\n"
-                f"Price: `{_fmt_pct(d.get('price_change_pct'))}` | "
-                f"MCap: `${_fmt_usd(d.get('market_cap_usd'))}`\n"
-                f"Risk: `{d.get('risk_score', '?')}`"
-            )
-
         if module == "oracle":
             score = int(d.get("score") or 0)
             arrow = "🟢 long bias" if score > 0 else "🔴 short bias" if score < 0 else "⚪ neutral"

@@ -8,7 +8,6 @@ from app.models.whaleradar import WhaleTrade, WhaleOnchainTransfer, OISurgeEvent
 from app.models.liquidmap import LiquidationEvent  # noqa: F401
 from app.models.sentiment import SentimentSnapshot, MarketSentimentSnapshot  # noqa: F401
 from app.models.macro import MacroSnapshot, EconomicEvent  # noqa: F401
-from app.models.gemradar import GemRadarAlert  # noqa: F401
 from app.models.oracle import OracleSignal, OracleOutcome  # noqa: F401
 from app.models.riskcalc import RiskCalcHistory  # noqa: F401
 from app.models.tradelog import Trade, TradeTag  # noqa: F401

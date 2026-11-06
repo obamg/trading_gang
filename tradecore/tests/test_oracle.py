@@ -48,7 +48,6 @@ def test_neutral_when_mixed_signals():
         "radarx":        {"direction": "bullish", "intensity": 0.5},
         "liquidmap":     {"direction": "bearish", "intensity": 0.5},
         "sentimentpulse": {"direction": "bullish", "intensity": 0.5},
-        "gemradar":      {"direction": "bearish", "intensity": 0.5},
     }
     score = _score_from(signals)
     assert -25 < score < 25
