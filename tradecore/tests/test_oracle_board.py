@@ -222,3 +222,40 @@ def test_rank_picks_merges_sides_by_abs_score_and_attaches_bucket():
     assert [p["symbol"] for p in picks] == ["B", "C"]
     assert picks[0]["similar"]["n"] == 44 and picks[1]["similar"]["n"] == 44
     assert rank_picks(snapshot, {}, limit=10)[2]["similar"]["n"] == 0
+
+
+# ---------- entry alerts ----------
+
+
+def _row(sym: str, score: int) -> dict:
+    return {"symbol": sym, "score": score, "agreeing_count": 3,
+            "modules": [{"name": "radarx"}], "current_price": 1.0}
+
+
+def test_new_entries_only_new_symbol_direction_pairs():
+    prev = {"bullish": [_row("AAA", 40)], "bearish": [_row("BBB", -40)]}
+    snap = {"bullish": [_row("AAA", 50), _row("BBB", 30)], "bearish": [_row("CCC", -80)]}
+    out = board_module.new_entries(prev, snap)
+    # AAA stayed bullish → no alert; BBB flipped → alert; strongest first.
+    assert [(r["symbol"], r["direction"]) for r in out] == [("CCC", "bearish"), ("BBB", "bullish")]
+
+
+def test_new_entries_cold_start_is_silent():
+    assert board_module.new_entries(None, {"bullish": [_row("AAA", 90)], "bearish": []}) == []
+
+
+@pytest.mark.asyncio
+async def test_alert_entries_caps_and_cooldown(monkeypatch, fake_redis):
+    published = []
+
+    async def _pub(module, payload):
+        published.append((module, payload["symbol"]))
+
+    monkeypatch.setattr(board_module.redis_service, "publish_alert", _pub)
+    prev = {"bullish": [], "bearish": []}
+    snap = {"bullish": [_row(f"S{i}", 90 - i) for i in range(5)], "bearish": []}
+    await board_module._alert_entries(prev, snap)
+    assert published == [("oracle", "S0"), ("oracle", "S1"), ("oracle", "S2")]
+    published.clear()
+    await board_module._alert_entries(prev, snap)  # S0-S2 now on cooldown
+    assert published == [("oracle", "S3"), ("oracle", "S4")]

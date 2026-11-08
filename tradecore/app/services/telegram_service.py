@@ -402,6 +402,16 @@ class TelegramService:
                     f"Chain: `{d.get('chain', '?')}`"
                 )
 
+        if module == "oracle" and t == "board_entry":
+            bull = d.get("direction") == "bullish"
+            return (
+                f"🔮 *Oracle Board — {sym}*  {'🟢 LONG' if bull else '🔴 SHORT'} direction\n"
+                f"Score `{int(d.get('score') or 0):+d}` · `{d.get('agreeing_count', '?')}` modules agree: "
+                f"{', '.join(d.get('agreeing_modules') or [])}\n"
+                f"Price `{d.get('current_price', '-')}`\n"
+                f"_Just joined the Confluence Board — not advice. /pause to mute for an hour._"
+            )
+
         if module == "oracle":
             score = int(d.get("score") or 0)
             arrow = "🟢 long bias" if score > 0 else "🔴 short bias" if score < 0 else "⚪ neutral"

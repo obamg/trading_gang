@@ -28,6 +28,7 @@ UNIVERSE_TTL_SECONDS = 300
 TOP_N = 50
 MIN_MODULES = 3
 INTENSITY_FLOOR = 0.3                # per-module bar to count as "agreeing"
+MAX_ENTRY_ALERTS_PER_TICK = 3        # a market-wide move puts many symbols on at once
 
 
 async def _top_symbols_by_volume() -> list[str]:
@@ -174,10 +175,53 @@ def rank_picks(snapshot: dict, buckets: dict[int, dict], limit: int) -> list[dic
     ]
 
 
+def new_entries(prev: dict | None, snapshot: dict) -> list[dict]:
+    """Rows whose (symbol, direction) was not on the previous board, strongest first.
+
+    No previous board (cold start, or the cache expired after a missed tick)
+    means nothing is "new" — otherwise a restart would page the whole board.
+    """
+    if prev is None:
+        return []
+    seen = {(r["symbol"], side) for side in ("bullish", "bearish") for r in prev.get(side, [])}
+    rows = [
+        {**r, "direction": side}
+        for side in ("bullish", "bearish")
+        for r in snapshot.get(side, [])
+        if (r["symbol"], side) not in seen
+    ]
+    rows.sort(key=lambda r: abs(int(r.get("score") or 0)), reverse=True)
+    return rows
+
+
+async def _alert_entries(prev: dict | None, snapshot: dict) -> None:
+    sent = 0
+    for row in new_entries(prev, snapshot):
+        if sent >= MAX_ENTRY_ALERTS_PER_TICK:
+            break
+        sym = row["symbol"]
+        if await redis_service.is_on_cooldown("oracle_board", sym):
+            continue  # flapped off and back on the board — already told
+        await redis_service.set_alert_cooldown("oracle_board", sym, app_settings.oracle_alert_cooldown_minutes)
+        await redis_service.publish_alert("oracle", {
+            "type": "board_entry",
+            "symbol": sym,
+            "direction": row["direction"],
+            "score": row["score"],
+            "agreeing_count": row["agreeing_count"],
+            "agreeing_modules": [m["name"] for m in row["modules"]],
+            "current_price": row.get("current_price"),
+        })
+        sent += 1
+        log.info("oracle_board_entry_published", symbol=sym, direction=row["direction"], score=row["score"])
+
+
 async def run_board_job() -> None:
     """Scheduler entrypoint. Swallows + logs exceptions per project convention."""
     try:
+        prev = await get_cached_board()
         snapshot = await compute_board()
+        await _alert_entries(prev, snapshot)
         log.info(
             "oracle_board_tick",
             bullish=len(snapshot["bullish"]),
@@ -191,6 +235,7 @@ async def run_board_job() -> None:
 __all__ = [
     "compute_board",
     "get_cached_board",
+    "new_entries",
     "rank_picks",
     "run_board_job",
     "score_bucket",
