@@ -598,7 +598,10 @@ class TelegramService:
             arrow = "🟢" if side == "LONG" else "🔴"
             ai = ""
             if d.get("ai_verdict"):
-                ai = f"\nAI: *{str(d['ai_verdict']).upper()}* — {d.get('ai_reason') or ''}"
+                # Model text built from news titles: strip Markdown so it can't break or inject into the message.
+                reason = str(d.get("ai_reason") or "").translate(str.maketrans("", "", "*_`[]()"))[:300]
+                verdict = "SKIP" if d["ai_verdict"] == "skip" else "TAKE"
+                ai = f"\nAI: *{verdict}* — {reason}"
             return (
                 f"{arrow} *DayTrade — {sym} {side}* (range breakout, {d.get('session', '?')} open)\n"
                 f"Entry: `{d.get('entry', '?')}` | Stop: `{d.get('stop', '?')}` | Target: `{d.get('target', '?')}`\n"
