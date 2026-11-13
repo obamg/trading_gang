@@ -28,7 +28,7 @@ from app.models.macro import EconomicEvent
 from app.models.news import NewsArticle
 from app.models.oracle import OracleSignal
 from app.modules.daytrade import ai
-from app.modules.daytrade.playbook import Playbook, build_plan, evaluate, gate, resolve
+from app.modules.daytrade.playbook import Playbook, alert_entry, build_plan, evaluate, gate, resolve
 from app.modules.riskcalc.calculator import RiskInput, calculate_position, funding_settlements
 from app.services import redis_service
 
@@ -146,7 +146,8 @@ async def _context(db, symbol: str, rows: list[dict], now: datetime) -> dict:
 async def _open_plan(db, ex: str, st: dict, rows: list[dict], plans: list[DayTradePlan], now: datetime):
     pb = PLAYBOOK
     symbol = st["symbol"]
-    plan, reasons = build_plan(st["side"], st["entry"], st["range_high"], st["range_low"], pb)
+    entry = alert_entry(st["side"], rows[-1]["c"], pb)
+    plan, reasons = build_plan(st["side"], entry, st["range_high"], st["range_low"], pb)
     if not plan:
         log.warning("daytrade_plan_invalid", symbol=symbol, reasons=reasons)
         return None
@@ -180,7 +181,12 @@ async def _open_plan(db, ex: str, st: dict, rows: list[dict], plans: list[DayTra
         range_high=st["range_high"], range_low=st["range_low"],
         stop_pct=plan["stop_pct"], vol_x=st["vol_x"], funding_rate=funding,
         checks={"reasons": reasons, "sizing": sizing},
-        triggered_at=datetime.fromtimestamp(st["trigger_close_ms"] / 1000, tz=timezone.utc),
+        # Alert time, not trigger-bar close: resolve() then only counts bars
+        # that open after the alert, so nothing that happened before a human
+        # could act is scored.
+        # ponytail: the rest of the 5m bar in progress is not checked for a
+        # stop/target touch (up to ~5 min). Use 1m bars if that ever matters.
+        triggered_at=now,
         exit_by=exit_by,
     )
     if not reasons:

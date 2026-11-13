@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.modules.daytrade.playbook import (
-    BAR_MS, Playbook, build_plan, evaluate, gate, net_r, resolve, scoreboard, session_start,
+    BAR_MS, Playbook, alert_entry, build_plan, evaluate, gate, net_r, resolve, scoreboard, session_start,
 )
 
 PB = Playbook()
@@ -138,6 +138,27 @@ def test_us_open_follows_new_york_time_across_daylight_saving():
 def test_changing_any_rule_changes_the_playbook_version():
     assert Playbook().version == PB.version
     assert Playbook(target_r=3.0).version != PB.version
+
+
+def test_changing_the_rule_code_changes_the_playbook_version(monkeypatch):
+    from app.modules.daytrade import playbook
+    before = PB.version
+    monkeypatch.setattr(playbook, "_RULES_SRC", "edited")
+    assert PB.version != before
+
+
+def test_live_fill_is_the_alert_price_and_only_later_bars_count():
+    assert alert_entry("LONG", 100.0, PB) == pytest.approx(100.05)
+    assert alert_entry("SHORT", 100.0, PB) == pytest.approx(99.95)
+    # A stop hit in the bar before the alert must not be scored.
+    alert = DAY + timedelta(minutes=67)
+    rows = [
+        {"t": T0 + 12 * BAR_MS, "o": 101, "h": 101.5, "l": 98.0, "c": 101, "v": 1.0},   # before alert
+        {"t": T0 + 14 * BAR_MS, "o": 101, "h": 101.5, "l": 100.8, "c": 101, "v": 1.0},  # after
+    ]
+    out = resolve("LONG", 101.0, 100.0, 103.0, int(alert.timestamp() * 1000),
+                  DAY + timedelta(hours=8), rows, DAY + timedelta(hours=2), PB)
+    assert out is None
 
 
 def test_resolve_target_time_stop_and_still_open():

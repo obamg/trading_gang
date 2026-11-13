@@ -4,9 +4,11 @@ An opening-range breakout (ORB) with the risk rules discretionary day traders
 and prop desks enforce:
 
   setup    first hour after a session open defines the range
-  entry    first CLOSED 5m bar beyond the range (a wick is not an entry),
-           filled at the NEXT bar's open plus slippage — the price a human
-           acting on the alert could actually get
+  entry    first CLOSED 5m bar beyond the range (a wick is not an entry).
+           The live desk fills at the price when the alert goes out, plus
+           slippage (`alert_entry`), and only counts bars that open after it:
+           the price a human acting on the alert could actually get. Replays
+           use the next bar's open, the same thing with no scanner delay.
   filters  trigger bar volume >= 1.5x the prior 20 bars, and with the trend
            (close on the right side of the 20h EMA)
   stop     range midpoint. Refused when, after fees, the target would pay
@@ -34,8 +36,8 @@ HONEST STATUS — read before trusting any of it:
 
 These numbers are deliberately NOT env-tunable. The repo's rule for anything
 that trades (see CLAUDE.md, "No trading bots") is pre-commit, judge once,
-disable rather than retune. Changing any constant changes `Playbook.version`,
-which starts a new forward test from zero.
+disable rather than retune. Changing any constant, or any line of this file,
+changes `Playbook.version`, which starts a new forward test from zero.
 
 Bars are dicts {t, o, h, l, c, v}: t = open time in epoch ms, ascending.
 """
@@ -45,7 +47,14 @@ import hashlib
 import statistics
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+# The rule logic is part of the version, not just the constants: an edit to
+# evaluate/resolve must not silently mix old and new results in one test.
+# ponytail: hashes the whole file, so a comment edit also restarts the test.
+# Deliberately conservative; hash the functions' bytecode if that ever hurts.
+_RULES_SRC = hashlib.sha1(Path(__file__).read_bytes()).hexdigest()
 
 BAR_MS = 5 * 60_000
 VOLUME_LOOKBACK = 20
@@ -92,7 +101,7 @@ class Playbook:
     def version(self) -> str:
         """Fingerprint of every rule. Stored on each plan; the scoreboard only
         counts plans made under the current one."""
-        return hashlib.sha1(repr(sorted(asdict(self).items())).encode()).hexdigest()[:10]
+        return hashlib.sha1((repr(sorted(asdict(self).items())) + _RULES_SRC).encode()).hexdigest()[:10]
 
 
 def _ms(dt: datetime) -> int:
@@ -190,6 +199,14 @@ def evaluate(rows: list[dict], now: datetime, spec: str, pb: Playbook) -> dict:
 
     res["status"] = "expired" if now >= expire else "waiting"
     return res
+
+
+def alert_entry(side: str, last_price: float, pb: Playbook) -> float:
+    """Paper fill for a live plan: the price when the alert is sent, moved
+    against us by the entry slippage. Not the trigger bar's next open, which
+    can be minutes old by the time the scanner sees it."""
+    s = 1 if side == "LONG" else -1
+    return float(f"{last_price * (1 + s * pb.entry_slippage_pct / 100.0):.8g}")
 
 
 def build_plan(side: str, entry: float, range_high: float, range_low: float, pb: Playbook) -> tuple[dict, list[str]]:

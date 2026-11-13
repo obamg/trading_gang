@@ -94,3 +94,22 @@ How to read it:
 Not done, by the terms above: no re-run as long-only, with other lookbacks, or on another
 universe. "Long-only would have passed" is a hypothesis this data suggested, which is the one
 kind of hypothesis this data cannot test. Scratch script and bars are not in the repo.
+
+---
+
+## Addendum, 2026-11-13: read this result as inconclusive, not as "no edge"
+
+An independent audit of the pass test found it underpowered. Nothing above is changed; this
+corrects how the verdict should be read.
+
+- With a monthly sd of 5.06 over 68 months, the standard error of the monthly mean is 0.61R.
+  A true edge of +0.5R per month would have cleared the bar about one time in three, and all
+  four conditions together about 15 to 20% of the time. Reaching 80% power needed a true
+  monthly mean near +1.3R.
+- The 90% interval on the monthly mean is roughly −0.29R to +1.28R: consistent with zero and
+  with a large edge alike. The test could not tell them apart, so "dropped" overstated it.
+- The decision stands for practical purposes: no playbook is built on this result, and the
+  same data cannot be re-tested. What changes is the label, from "failed" to "not shown".
+- A better-specified test (not run): weekly portfolio return in % of equity at fixed risk per
+  trade, compared with buy-and-hold of the same basket (the long-side profit may be market
+  beta), with the smallest detectable edge computed before looking.
