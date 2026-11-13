@@ -23,6 +23,7 @@ import WalletWatchPage from "@/pages/dashboard/walletwatch";
 import ListingWatchPage from "@/pages/dashboard/listings";
 import WaveWatchPage from "@/pages/dashboard/wavewatch";
 import DayTradePage from "@/pages/dashboard/daytrade";
+import XsTrendPage from "@/pages/dashboard/xstrend";
 import SettingsPage from "@/pages/settings";
 import LandingPage from "@/pages/landing";
 import { useAuthStore } from "@/stores/authStore";
@@ -119,6 +120,7 @@ export default function App() {
             <Route path="/listings" element={<ListingWatchPage />} />
             <Route path="/wavewatch" element={<WaveWatchPage />} />
             <Route path="/daytrade" element={<DayTradePage />} />
+            <Route path="/xstrend" element={<XsTrendPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
 

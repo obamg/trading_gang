@@ -26,3 +26,4 @@ from app.models.listing import NewListingEvent, ListingSignal  # noqa: F401
 from app.models.wavewatch import WaveAsset  # noqa: F401
 from app.models.chainpulse import ChainPulseSnapshot  # noqa: F401
 from app.models.daytrade import DayTradePlan  # noqa: F401
+from app.models.xstrend import XsTrendWeek  # noqa: F401

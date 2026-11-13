@@ -645,3 +645,49 @@ export interface DayTradeDesk {
 export const daytradeApi = {
   desk: () => http.get<DayTradeDesk>("/daytrade/desk").then((r) => r.data),
 };
+
+// ---------- XsTrend (weekly paper portfolio) ----------
+// Returns are fractions of capital: 0.01 = 1%.
+export interface XsTrendPosition {
+  symbol: string;
+  weight: number;
+  return: number | null;
+  funding: number | null;
+}
+export interface XsTrendWeek {
+  week_start: string;
+  status: "open" | "settled" | "skipped";
+  positions: XsTrendPosition[];
+  turnover: number | null;
+  gross: number | null;
+  cost: number | null;
+  funding: number | null;
+  net: number | null;
+  mkt: number | null;
+}
+export interface XsTrendPortfolio {
+  enabled: boolean;
+  rules: { version: string; universe: number; per_leg: number; horizons: number[]; cost_pct: number; first_week: string };
+  next_rebalance: string;
+  current: XsTrendWeek | null;
+  weeks: XsTrendWeek[];
+  stats: {
+    n: number;
+    target: number;
+    verdict: "running" | "pass" | "ruled_out" | "inconclusive";
+    mean: number | null;
+    sd: number | null;
+    bar: number | null;
+    low: number | null;
+    high: number | null;
+    total: number;
+    drawdown: number;
+    win_rate: number | null;
+    top5_share: number | null;
+    mkt_total: number;
+  };
+  generated_at: string;
+}
+export const xstrendApi = {
+  portfolio: () => http.get<XsTrendPortfolio>("/xstrend/portfolio").then((r) => r.data),
+};

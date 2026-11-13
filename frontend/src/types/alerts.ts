@@ -13,7 +13,8 @@ export type ModuleKey =
   | "listingwatch"
   | "awakening"
   | "wavewatch"
-  | "daytrade";
+  | "daytrade"
+  | "xstrend";
 
 export interface AlertEvent {
   type: string;

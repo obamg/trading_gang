@@ -172,6 +172,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     daytrade_ai_model: str = "claude-opus-5-5"
 
+    # XsTrend — weekly cross-sectional trend, paper portfolio. Public Bybit
+    # daily bars only, about a thousand requests once a week. No orders. Rules
+    # are constants in app/modules/xstrend/rules.py (pre-registered forward test).
+    xstrend_enabled: bool = False
+
     # WaveWatch — continuous surveillance of Bybit Innovation Zone assets.
     # Fires a "wave incoming" alert when an asset shows prior accumulation
     # (volume baseline rising + range compression + buy-side bias) AND a

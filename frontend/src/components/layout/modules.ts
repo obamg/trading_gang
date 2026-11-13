@@ -13,6 +13,7 @@ import {
   Sparkles,
   Waves,
   CandlestickChart,
+  Scale,
   type LucideIcon,
 } from "lucide-react";
 import type { ModuleKey } from "@/types/alerts";
@@ -40,6 +41,7 @@ export const MODULES: ModuleDef[] = [
   { key: "listingwatch", label: "ListingWatch", path: "/listings", color: "#EC4899", icon: Sparkles },
   { key: "wavewatch", label: "WaveWatch", path: "/wavewatch", color: "#0EA5E9", icon: Waves },
   { key: "daytrade", label: "DayTrade", path: "/daytrade", color: "#D946EF", icon: CandlestickChart },
+  { key: "xstrend", label: "TrendBasket", path: "/xstrend", color: "#84CC16", icon: Scale },
 ];
 
 export const MODULE_BY_KEY: Record<ModuleKey, ModuleDef> = Object.fromEntries(

@@ -101,6 +101,7 @@ services:
       SCHEDULER_ENABLED: "false"
       # DayTrade desk: paper plans from public klines. AI verdict needs a key.
       DAYTRADE_ENABLED: "true"
+      XSTREND_ENABLED: "true"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Turn Binance streams off by default — flip to "true" for live candles
       BINANCE_STREAMS_ENABLED: "true"
@@ -135,6 +136,7 @@ services:
       SCHEDULER_ENABLED: "true"
       # DayTrade desk: paper plans from public klines. AI verdict needs a key.
       DAYTRADE_ENABLED: "true"
+      XSTREND_ENABLED: "true"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       BINANCE_STREAMS_ENABLED: "false"
       RUN_MIGRATIONS: "0"
