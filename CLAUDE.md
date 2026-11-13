@@ -40,7 +40,7 @@ Test login: `test@example.com` / `test1234`.
 
 The backend is organized as **module packages** under `tradecore/app/modules/`. Each module is a self-contained vertical (detector + router + sometimes a model file in `app/models/`):
 
-`radarx`, `whaleradar`, `liquidmap`, `sentimentpulse`, `macropulse`, `riskcalc`, `performance`, `oracle`, `flowpulse`, `newspulse`, `positionmonitor`, `exchanges`, `listingwatch`, `awakening`, `wavewatch`, `walletwatch` (+ `walletwatch/discovery` sub-module for PnL-based wallet auto-discovery), `chainpulse`.
+`radarx`, `whaleradar`, `liquidmap`, `sentimentpulse`, `macropulse`, `riskcalc`, `performance`, `oracle`, `flowpulse`, `newspulse`, `positionmonitor`, `exchanges`, `listingwatch`, `awakening`, `wavewatch`, `walletwatch` (+ `walletwatch/discovery` sub-module for PnL-based wallet auto-discovery), `chainpulse`, `daytrade`.
 
 Each module typically exposes:
 - `router.py` — FastAPI router, mounted from `app/main.py`
@@ -54,12 +54,14 @@ One-liners for the modules a new contributor is most likely to touch:
 - `wavewatch` — Innovation Zone surveillance with two signals: `wave_incoming` (pre-wave coiling, dwell-gated) and `wave_active` (single-bar cascade/squeeze with funding alignment). Universe spans Bybit Innovation + Binance Innovation/Seed.
 - `listingwatch` — diffs current exchange instrument lists to detect new listings; force-subscribes the bybit stream.
 - `walletwatch` — labeled-address DEX swap monitor across ETH/BSC/Arbitrum/Base/Solana.
+- `daytrade` — opening-range-breakout plans (entry / stop / target / size) on a fixed list of liquid majors, from public 5m klines. Paper-tracked: each plan's outcome is simulated and scored against a pre-committed gate (first 60 closed plans, average net R above a one-sided 90% bound, judged once). A 90-day replay of the current rules averaged −0.215R over 236 trades and failed that gate in every block, so treat it as a paper desk with no demonstrated edge. An optional Claude verdict (`ANTHROPIC_API_KEY`) is logged per plan but never changes or blocks it. The rules are constants in `daytrade/playbook.py`, deliberately not env-tunable.
 - `chainpulse` — daily Santiment on-chain macro snapshots (MVRV, NVT, exchange flows, active addresses) per asset, with a derived regime label. No-ops with a log line when `SANTIMENT_API_KEY` is unset.
 
 ### No trading bots
 
 TradeCore has **no trading bot and no order routing**. It is an intelligence
-platform: it detects, scores and alerts, and a human trades.
+platform: it detects, scores and alerts, and a human trades. (`daytrade` stays
+inside that line: it writes paper plans and alerts, and never sends an order.)
 
 Two bots existed and both were removed after failing their pre-committed
 evaluation gates — `bot`/WaveBot (retired 2026-08) and `majorsbot` (removed
@@ -128,6 +130,7 @@ awakening:baseline                    hash {exchange:symbol → median_turnover_
 awakening:hist:{exchange}:{symbol}    list of last 7 daily turnover floats
 listingwatch:known                    set of {exchange}:{market}:{symbol} — diff target
 walletwatch:cursor:{chain}:{addr}     per-chain ingest cursor
+daytrade:board                        JSON string, TTL 600s — live state of every (symbol, session) setup
 ```
 
 Don't change a key shape without grepping for consumers across `app/modules/`.

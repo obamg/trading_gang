@@ -35,6 +35,7 @@ from app.modules.awakening import detector as awakening_detector
 from app.modules.wavewatch import detector as wavewatch_detector
 from app.modules.whaleradar import detector as whaleradar_detector
 from app.modules.chainpulse import collector as chainpulse_collector
+from app.modules.daytrade import scanner as daytrade_scanner
 from app.services import redis_service
 from app.services.exchanges import sync as exchange_sync
 
@@ -365,6 +366,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=1,
         id="wavewatch_tick",
+        coalesce=True,
+        max_instances=1,
+    )
+    sched.add_job(
+        daytrade_scanner.run_daytrade_tick,
+        "interval",
+        minutes=1,
+        id="daytrade_tick",
         coalesce=True,
         max_instances=1,
     )

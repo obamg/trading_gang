@@ -160,6 +160,18 @@ class Settings(BaseSettings):
     awakening_ratio_threshold: float = 3.0
     awakening_min_turnover_usd: float = 2_000_000.0
 
+    # DayTrade — opening-range-breakout plans (entry / stop / target / size)
+    # on liquid majors, paper-tracked against a pre-committed forward test.
+    # Detects and alerts only: no order is ever sent. The playbook's rules
+    # live as constants in app/modules/daytrade/playbook.py on purpose — they
+    # are not tunable from env (pre-commit, judge once, disable not retune).
+    daytrade_enabled: bool = False
+    daytrade_symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT"
+    daytrade_account_usd: float = 1000.0   # reference account for the sizing shown in alerts
+    # Optional AI second opinion on each plan. Empty key = no verdict, plans still fire.
+    anthropic_api_key: str = ""
+    daytrade_ai_model: str = "claude-opus-5-5"
+
     # WaveWatch — continuous surveillance of Bybit Innovation Zone assets.
     # Fires a "wave incoming" alert when an asset shows prior accumulation
     # (volume baseline rising + range compression + buy-side bias) AND a

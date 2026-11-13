@@ -38,6 +38,7 @@ const config: Config = {
         "mod-tradelog": "#94A3B8",
         "mod-performancecore": "#14B8A6",
         "mod-oracle": "#8B5CF6",
+        "mod-daytrade": "#D946EF",
       },
       fontFamily: {
         ui: ["Inter", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
@@ -67,6 +68,14 @@ const config: Config = {
           "0%,100%": { transform: "scale(1)", opacity: "1" },
           "50%": { transform: "scale(1.3)", opacity: "0.7" },
         },
+        drawIn: {
+          "0%": { transform: "scaleX(0)", opacity: "0" },
+          "100%": { transform: "scaleX(1)", opacity: "1" },
+        },
+        dash: {
+          "0%": { strokeDashoffset: "1" },
+          "100%": { strokeDashoffset: "0" },
+        },
         slideDown: {
           "0%": { transform: "translateY(-8px)", opacity: "0" },
           "100%": { transform: "translateY(0)", opacity: "1" },
@@ -76,6 +85,8 @@ const config: Config = {
         shimmer: "shimmer 1.5s linear infinite",
         pulseDot: "pulseDot 2s ease-in-out infinite",
         slideDown: "slideDown 300ms ease-out",
+        drawIn: "drawIn 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both",
+        dash: "dash 1.4s ease-out both",
       },
     },
   },

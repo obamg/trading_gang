@@ -98,6 +98,7 @@ const MODULE_BLURBS: Record<string, string> = {
   walletwatch: "Labeled smart-money wallets swapping on ETH, BSC, Arbitrum, Base and Solana.",
   listingwatch: "New exchange listings caught the moment they appear.",
   wavewatch: "Innovation Zone coins coiling before a wave — and the cascade when it hits.",
+  daytrade: "Opening-range breakouts on the majors, each with an entry, a stop, a target and a size.",
 };
 
 function ModulesShowcase() {

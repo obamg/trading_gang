@@ -582,6 +582,32 @@ class TelegramService:
                 f"_Innovation Zone — wave forming_"
             )
 
+        if module == "daytrade" and t == "plan_closed":
+            icon = {"target": "🎯", "stop": "🛑"}.get(d.get("result"), "⏱")
+            try:
+                r = f"{float(d.get('pnl_r', 0)):+.2f}R"
+            except (TypeError, ValueError):
+                r = "?"
+            return (
+                f"{icon} *DayTrade closed — {sym}* ({d.get('side', '?')})\n"
+                f"Result: `{d.get('result', '?')}` at `{d.get('exit_price', '?')}` | `{r}` (paper)"
+            )
+
+        if module == "daytrade":
+            side = d.get("side", "?")
+            arrow = "🟢" if side == "LONG" else "🔴"
+            ai = ""
+            if d.get("ai_verdict"):
+                ai = f"\nAI: *{str(d['ai_verdict']).upper()}* — {d.get('ai_reason') or ''}"
+            return (
+                f"{arrow} *DayTrade — {sym} {side}* (range breakout, {d.get('session', '?')} open)\n"
+                f"Entry: `{d.get('entry', '?')}` | Stop: `{d.get('stop', '?')}` | Target: `{d.get('target', '?')}`\n"
+                f"Stop distance: `{d.get('stop_pct', '?')}%` | Volume: `{d.get('vol_x', '?')}×`\n"
+                f"Size on ${d.get('account_usd', '?')}: `{_fmt_usd(d.get('size_usd'))}` at `{d.get('leverage', '?')}×`"
+                f"{ai}\n"
+                f"_Paper plan — unproven playbook. You place the trade._"
+            )
+
         return f"📣 *{module.title()} — {sym}*\n`{t or 'alert'}`"
 
 

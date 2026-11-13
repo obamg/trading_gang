@@ -87,3 +87,14 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
 }
+
+/* DayTrade desk: motion is information there (a price moving through a range),
+   but it must switch off for people who ask for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  .dt-desk *,
+  .dt-desk *::before,
+  .dt-desk *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

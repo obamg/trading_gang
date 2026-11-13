@@ -538,3 +538,90 @@ export const wavewatchApi = {
     http.get<WaveState>(`/wavewatch/${symbol}/state`).then((r) => r.data),
 };
 
+// ---------- DayTrade ----------
+export type DayTradeStatus = "forming" | "waiting" | "triggered" | "missed" | "expired";
+export interface DayTradeSetup {
+  symbol: string;
+  session: string; // "HH:MM@timezone"
+  status: DayTradeStatus;
+  anchor: string;
+  range_end: string;
+  expires: string;
+  last_price: number | null;
+  bars_closed: number;
+  bars_needed: number;
+  range_high?: number;
+  range_low?: number;
+  side?: "LONG" | "SHORT";
+  entry?: number;
+  vol_x?: number;
+  plan_status?: string;
+  skipped: { t: number; side: string; close: number; why: string }[];
+}
+export interface DayTradePlan {
+  id: string;
+  exchange: string;
+  symbol: string;
+  session_at: string;
+  side: "LONG" | "SHORT";
+  status: "open" | "target" | "stop" | "time" | "blocked";
+  entry: number;
+  stop: number;
+  target: number;
+  range_high: number;
+  range_low: number;
+  stop_pct: number;
+  vol_x: number | null;
+  funding_rate: number | null;
+  reasons: string[];
+  ai_verdict: "take" | "skip" | null;
+  ai_reason: string | null;
+  triggered_at: string;
+  exit_by: string;
+  closed_at: string | null;
+  exit_price: number | null;
+  pnl_r: number | null;
+}
+export interface DayTradePlaybook {
+  sessions: string[];
+  range_minutes: number;
+  expire_hours: number;
+  min_volume_x: number;
+  min_net_rr: number;
+  target_r: number;
+  risk_pct: number;
+  max_leverage: number;
+  max_trades_per_session: number;
+  max_trades_per_day: number;
+  daily_loss_limit_r: number;
+  max_consecutive_losses: number;
+  gate_n: number;
+  friction_pct: number;
+  version: string;
+}
+export interface DayTradeDesk {
+  enabled: boolean;
+  ai_enabled: boolean;
+  exchange: string;
+  symbols: string[];
+  account_usd: number;
+  playbook: DayTradePlaybook;
+  board: { at: string; exchange: string; setups: DayTradeSetup[] } | null;
+  gate: { trades: number; loss_r: number; open: number; streak: number; blocked: string[] };
+  plans: DayTradePlan[];
+  stats: {
+    n: number;
+    gate_n: number;
+    wins: number;
+    avg_r: number | null;
+    total_r: number;
+    curve: number[];
+    verdict: "collecting" | "passed" | "failed";
+    bar: number | null;
+    by_ai: Record<"take" | "skip", { n: number; avg_r: number | null }>;
+  };
+  generated_at: string;
+}
+export const daytradeApi = {
+  desk: () => http.get<DayTradeDesk>("/daytrade/desk").then((r) => r.data),
+};
