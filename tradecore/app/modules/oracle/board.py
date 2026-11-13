@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import httpx
 
 from app.config import settings as app_settings
 from app.database import AsyncSessionLocal
 from app.logging_config import log
+from app.models.oracle import OracleOutcome, OracleSignal
 from app.modules.oracle.engine import compute_live_score
 from app.services import redis_service
 
@@ -194,6 +196,36 @@ def new_entries(prev: dict | None, snapshot: dict) -> list[dict]:
     return rows
 
 
+async def _record_entry(row: dict) -> str | None:
+    """Persist an alerted board entry so measure_outcomes follows it up.
+
+    Stored as an OracleSignal with timeframe="board" (the feed that produced
+    it); direction, not the live recommendation, decides long/short, since
+    that is what the alert told the user.
+    """
+    price = row.get("current_price")
+    if not price:
+        return None  # nothing to measure against
+    async with AsyncSessionLocal() as db:
+        sig = OracleSignal(
+            symbol=row["symbol"],
+            score=int(row["score"]),
+            recommendation="long" if row["direction"] == "bullish" else "short",
+            confidence=row.get("confidence") or "medium",
+            confluence_count=int(row["agreeing_count"]),
+            signals_breakdown={m["name"]: m for m in row["modules"]},
+            entry_price=Decimal(str(price)),
+            timeframe="board",
+            signal_at=datetime.now(timezone.utc),
+            alerted=True,
+        )
+        db.add(sig)
+        await db.flush()
+        db.add(OracleOutcome(signal_id=sig.id, price_at_signal=Decimal(str(price))))
+        await db.commit()
+        return str(sig.id)
+
+
 async def _alert_entries(prev: dict | None, snapshot: dict) -> None:
     sent = 0
     for row in new_entries(prev, snapshot):
@@ -203,8 +235,14 @@ async def _alert_entries(prev: dict | None, snapshot: dict) -> None:
         if await redis_service.is_on_cooldown("oracle_board", sym):
             continue  # flapped off and back on the board — already told
         await redis_service.set_alert_cooldown("oracle_board", sym, app_settings.oracle_alert_cooldown_minutes)
+        try:
+            signal_id = await _record_entry(row)
+        except Exception as e:  # an alert without a record beats no alert
+            log.warning("oracle_board_entry_record_failed", symbol=sym, err=str(e))
+            signal_id = None
         await redis_service.publish_alert("oracle", {
             "type": "board_entry",
+            "id": signal_id,
             "symbol": sym,
             "direction": row["direction"],
             "score": row["score"],

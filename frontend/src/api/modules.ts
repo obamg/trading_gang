@@ -266,6 +266,7 @@ export const oracleApi = {
   detail: (id: string) => http.get<OracleSignal>(`/oracle/signals/${id}`).then((r) => r.data),
   live: (symbol: string) => http.get<LiveOracle>(`/oracle/live/${symbol}`).then((r) => r.data),
   picks: (limit = 10) => http.get<OraclePicksResponse>("/oracle/picks", { params: { limit } }).then((r) => r.data),
+  followups: (limit = 30, offset = 0) => http.get<OracleFollowupsResponse>("/oracle/followups", { params: { limit, offset } }).then((r) => r.data),
   updateSettings: (body: Record<string, unknown>) => http.post("/oracle/settings", body).then((r) => r.data),
   board: (params?: { direction?: "bullish" | "bearish"; min_modules?: number; min_score?: number }) =>
     http.get<OracleBoardResponse>("/oracle/board", { params }).then((r) => r.data),
@@ -292,6 +293,25 @@ export interface OracleOutcomeStats {
   hit_4h_pct: number | null;
   avg_move_4h_pct: number | null;
 }
+export type FollowupVerdict = "right" | "wrong" | "flat";
+export interface OracleFollowup {
+  id: string;
+  symbol: string;
+  source: "board" | "oracle";
+  direction: "long" | "short" | "neutral";
+  score: number;
+  signal_at: string;
+  price_at_signal: number | null;
+  mfe_1h_pct: number | null;
+  mae_1h_pct: number | null;
+  horizons: Record<"1h" | "4h" | "24h", { move_pct: number; verdict: FollowupVerdict } | null>;
+}
+export interface OracleFollowupsResponse {
+  items: OracleFollowup[];
+  record: OracleFollowupRecord;
+  record_all_time: OracleFollowupRecord;
+}
+export interface OracleFollowupRecord { days: number | null; n: number; hit_pct: number | null; avg_move_pct: number | null }
 export interface OracleEvent {
   name: string;
   kind: "macro" | "options";

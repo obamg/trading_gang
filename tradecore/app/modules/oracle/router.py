@@ -12,7 +12,15 @@ from app.models.oracle import OracleOutcome, OracleSignal
 from app.models.settings import UserSettings
 from app.modules.oracle import events as oracle_events
 from app.modules.oracle.board import get_cached_board, rank_picks
-from app.modules.oracle.engine import DEFAULT_WEIGHTS, compute_live_score, generate_signal
+from app.modules.oracle.engine import (
+    DEFAULT_WEIGHTS,
+    LONG_RECS,
+    SHORT_RECS,
+    alert_track_record,
+    compute_live_score,
+    followup_payload,
+    generate_signal,
+)
 
 router = APIRouter(
     prefix="/oracle", tags=["oracle"],
@@ -119,6 +127,52 @@ async def performance(_user: CurrentUser, db: DBSession):
         "measured_4h": measured_4h,
         "accuracy_1h_pct": round(correct_1h / measured_1h * 100, 2) if measured_1h else None,
         "accuracy_4h_pct": round(correct_4h / measured_4h * 100, 2) if measured_4h else None,
+    }
+
+
+@router.get("/followups")
+async def followups(
+    _user: CurrentUser,
+    db: DBSession,
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Alerted signals, newest first, with what price did afterwards. Paged — history is never pruned."""
+    rows = (await db.execute(
+        select(OracleSignal, OracleOutcome)
+        .join(OracleOutcome, OracleOutcome.signal_id == OracleSignal.id)
+        .where(OracleSignal.alerted.is_(True))
+        .order_by(desc(OracleSignal.signal_at))
+        .limit(limit)
+        .offset(offset)
+    )).all()
+
+    def _num(v):
+        return float(v) if v is not None else None
+
+    items = []
+    for sig, out in rows:
+        h = {}
+        for horizon in ("1h", "4h", "24h"):
+            p = followup_payload(sig, out, horizon, {})
+            h[horizon] = {"move_pct": p["move_pct"], "verdict": p["verdict"]} if p else None
+        items.append({
+            "id": str(sig.id),
+            "symbol": sig.symbol,
+            "source": "board" if sig.timeframe == "board" else "oracle",
+            "direction": "long" if sig.recommendation in LONG_RECS else "short" if sig.recommendation in SHORT_RECS else "neutral",
+            "score": sig.score,
+            "signal_at": sig.signal_at.isoformat(),
+            "price_at_signal": _num(out.price_at_signal),
+            "mfe_1h_pct": _num(out.mfe_1h_pct),
+            "mae_1h_pct": _num(out.mae_1h_pct),
+            "horizons": h,
+        })
+    now = datetime.now(timezone.utc)
+    return {
+        "items": items,
+        "record": await alert_track_record(db, now),
+        "record_all_time": await alert_track_record(db, now, days=None),
     }
 
 

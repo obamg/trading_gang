@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -15,12 +15,14 @@ import {
   type LiveOracle,
   type OracleBoardRow,
   type OracleEvent,
+  type OracleFollowup,
+  type FollowupVerdict,
   type OracleOutcomeStats,
   type OraclePick,
   type OracleSignal,
 } from "@/api/modules";
 
-type TabKey = "picks" | "symbol" | "board";
+type TabKey = "picks" | "symbol" | "board" | "followup";
 
 // Below this many measured signals a hit rate is noise — say "too few".
 const MIN_SAMPLE = 20;
@@ -56,6 +58,7 @@ export default function OraclePage() {
           { key: "picks", label: "Top Picks" },
           { key: "symbol", label: "Per-Symbol Analysis" },
           { key: "board", label: "Confluence Board" },
+          { key: "followup", label: "Alert Follow-up" },
         ]}
         active={tab}
         onChange={(k) => setTab(k as TabKey)}
@@ -66,6 +69,7 @@ export default function OraclePage() {
       )}
       {tab === "symbol" && <PerSymbolView key={symbol} initialSymbol={symbol} />}
       {tab === "board" && <ConfluenceBoardView />}
+      {tab === "followup" && <FollowupView />}
     </div>
   );
 }
@@ -212,6 +216,117 @@ function PickRow({ rank, pick, onOpen, onTrade }: { rank: number; pick: OraclePi
         <Button size="sm" variant="secondary" onClick={onTrade}>Trade</Button>
       </div>
     </div>
+  );
+}
+
+// ---------- alert follow-up ----------
+
+const VERDICT_META: Record<FollowupVerdict, { cls: string; icon: string; title: string }> = {
+  right: { cls: "text-profit", icon: "✅", title: "Moved in the called direction by more than the noise bar" },
+  wrong: { cls: "text-loss", icon: "❌", title: "Moved against the call by more than the noise bar" },
+  flat: { cls: "text-textMuted", icon: "➖", title: "Moved less than the noise bar either way — no real move" },
+};
+
+function FollowupView() {
+  const PAGE = 50;
+  const q = useInfiniteQuery({
+    queryKey: ["oracle", "followups"],
+    queryFn: ({ pageParam }) => oracleApi.followups(PAGE, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => (last.items.length < PAGE ? undefined : pages.length * PAGE),
+    refetchInterval: 60_000,
+  });
+  const isLoading = q.isLoading;
+  const first = q.data?.pages[0];
+  const data = first && { items: q.data!.pages.flatMap((p) => p.items) };
+  const rec = first?.record;
+  const all = first?.record_all_time;
+
+  return (
+    <Card>
+      <CardHeader><h2 className="text-sm font-semibold">What happened after each alert</h2></CardHeader>
+      <CardBody className="flex flex-col gap-3">
+        <p className="text-xs text-textSecondary sm:text-sm">
+          Every alert you got on Telegram, then price 1h, 4h and 24h later, measured <i>in the called direction</i> (+ = the call was right).
+          Under ±0.2% (±0.5% for strong calls) counts as no real move. "Best / worst 1h" is how far it ran for and against you in the first hour —
+          a call can close right but stop you out first. You also get a Telegram follow-up at 4h and 24h.
+        </p>
+        {rec && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-md border border-borderSubtle bg-bgElevated px-3 py-2 text-xs sm:text-sm">
+            <span className="font-semibold">Last {rec.days} days at 4h</span>
+            {rec.n < MIN_SAMPLE ? (
+              <Badge variant="neutral">Too few alerts to judge (n={rec.n})</Badge>
+            ) : (
+              <Badge variant={(rec.hit_pct ?? 0) > 50 ? "bullish" : "warning"}>{rec.hit_pct}% right</Badge>
+            )}
+            <span className="text-textSecondary">Avg move: <b className="text-textPrimary">{pct(rec.avg_move_pct, true)}</b></span>
+            {all && all.n > 0 && (
+              <span className="text-textSecondary">
+                All time: <b className="text-textPrimary">{pct(all.hit_pct)}</b> right · {pct(all.avg_move_pct, true)} · n={all.n}
+              </span>
+            )}
+          </div>
+        )}
+        {isLoading ? (
+          <Skeleton className="h-40" />
+        ) : !data?.items.length ? (
+          <p className="text-sm text-textSecondary">No alerts yet. The next Telegram alert will show up here and be tracked.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-xs sm:text-sm">
+              <thead className="text-left text-textMuted">
+                <tr>
+                  <th className="py-1 pr-3 font-medium">When</th>
+                  <th className="py-1 pr-3 font-medium">Call</th>
+                  <th className="py-1 pr-3 text-right font-medium">1h</th>
+                  <th className="py-1 pr-3 text-right font-medium">4h</th>
+                  <th className="py-1 pr-3 text-right font-medium">24h</th>
+                  <th className="py-1 text-right font-medium">Best / worst 1h</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((f) => <FollowupRow key={f.id} f={f} />)}
+              </tbody>
+            </table>
+            {q.hasNextPage && (
+              <Button size="sm" variant="secondary" className="mt-2" disabled={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>
+                {q.isFetchingNextPage ? "Loading…" : "Load older alerts"}
+              </Button>
+            )}
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function FollowupRow({ f }: { f: OracleFollowup }) {
+  const long = f.direction === "long";
+  const [best, worst] = long ? [f.mfe_1h_pct, f.mae_1h_pct] : [f.mae_1h_pct, f.mfe_1h_pct];
+  return (
+    <tr className="border-t border-borderSubtle">
+      <td className="py-1.5 pr-3 text-textSecondary tabular-nums">
+        {new Date(f.signal_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+      </td>
+      <td className="py-1.5 pr-3">
+        <span className="font-semibold">{f.symbol}</span>{" "}
+        <span className={`text-xs font-bold ${long ? "text-profit" : "text-loss"}`}>{long ? "LONG" : "SHORT"}</span>{" "}
+        <span className="text-[10px] text-textMuted">{f.source === "board" ? "board" : "oracle"} @ {f.price_at_signal ?? "—"}</span>
+      </td>
+      {(["1h", "4h", "24h"] as const).map((h) => {
+        const v = f.horizons[h];
+        if (!v) return <td key={h} className="py-1.5 pr-3 text-right text-textMuted">pending</td>;
+        const m = VERDICT_META[v.verdict];
+        return (
+          <td key={h} className={`py-1.5 pr-3 text-right tabular-nums ${m.cls}`} title={m.title}>
+            {m.icon} {pct(v.move_pct, true)}
+          </td>
+        );
+      })}
+      <td className="py-1.5 text-right tabular-nums text-textSecondary">
+        {best === null || worst === null ? "—" : <><span className="text-profit">+{best.toFixed(2)}%</span> / <span className="text-loss">-{worst.toFixed(2)}%</span></>}
+      </td>
+    </tr>
   );
 }
 

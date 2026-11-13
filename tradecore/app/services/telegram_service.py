@@ -402,6 +402,9 @@ class TelegramService:
                     f"Chain: `{d.get('chain', '?')}`"
                 )
 
+        if module == "oracle" and t == "followup":
+            return _format_followup(d)
+
         if module == "oracle" and t == "board_entry":
             bull = d.get("direction") == "bullish"
             return (
@@ -633,6 +636,37 @@ def _fmt_pct(v) -> str:
         return f"{float(v):+.2f}%"
     except (TypeError, ValueError):
         return "?"
+
+
+_FOLLOWUP_LESSON = {
+    "right": "✅ *Right* — it moved {move} in the called direction.",
+    "wrong": "❌ *Wrong* — it went {move} against the call. If you'd entered, the stop was what mattered.",
+    "flat": "➖ *No real move* — {move} is inside the ±{bar}% noise band. Confluence doesn't promise a move, and fees eat a flat trade.",
+}
+
+
+def _format_followup(d: dict) -> str:
+    """What happened N hours after an alert — the lesson, then the base rate."""
+    long = d.get("direction") == "long"
+    lesson = _FOLLOWUP_LESSON.get(d.get("verdict"), "{move}").format(
+        move=_fmt_pct(d.get("move_pct")), bar=d.get("noise_bar_pct", "?"),
+    )
+    lines = [
+        f"📚 *Follow-up {d.get('horizon')} — {d.get('symbol', '?')}* {'🟢 LONG' if long else '🔴 SHORT'} call",
+        f"Price `{d.get('price_at_signal')}` → `{d.get('price_now')}`",
+        lesson,
+    ]
+    best, worst = d.get("best_1h_pct"), d.get("worst_1h_pct")
+    if best is not None and worst is not None:
+        # Shows whether a target or stop would have been hit early, even if the close says otherwise.
+        lines.append(f"First hour: best `+{best:.2f}%` for the call, worst `-{worst:.2f}%` against it")
+    rec = d.get("record") or {}
+    if rec.get("n"):
+        lines.append(
+            f"_Alerts, last {rec.get('days')}d at 4h: {rec.get('hit_pct')}% right, avg {_fmt_pct(rec.get('avg_move_pct'))} "
+            f"(n={rec['n']}{', too few to trust' if rec['n'] < 20 else ''})._"
+        )
+    return "\n".join(lines)
 
 
 def _short_addr(v) -> str:
