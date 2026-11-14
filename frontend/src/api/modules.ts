@@ -266,6 +266,7 @@ export const oracleApi = {
   detail: (id: string) => http.get<OracleSignal>(`/oracle/signals/${id}`).then((r) => r.data),
   live: (symbol: string) => http.get<LiveOracle>(`/oracle/live/${symbol}`).then((r) => r.data),
   picks: (limit = 10) => http.get<OraclePicksResponse>("/oracle/picks", { params: { limit } }).then((r) => r.data),
+  followups: (limit = 30, offset = 0) => http.get<OracleFollowupsResponse>("/oracle/followups", { params: { limit, offset } }).then((r) => r.data),
   updateSettings: (body: Record<string, unknown>) => http.post("/oracle/settings", body).then((r) => r.data),
   board: (params?: { direction?: "bullish" | "bearish"; min_modules?: number; min_score?: number }) =>
     http.get<OracleBoardResponse>("/oracle/board", { params }).then((r) => r.data),
@@ -292,6 +293,25 @@ export interface OracleOutcomeStats {
   hit_4h_pct: number | null;
   avg_move_4h_pct: number | null;
 }
+export type FollowupVerdict = "right" | "wrong" | "flat";
+export interface OracleFollowup {
+  id: string;
+  symbol: string;
+  source: "board" | "oracle";
+  direction: "long" | "short" | "neutral";
+  score: number;
+  signal_at: string;
+  price_at_signal: number | null;
+  mfe_1h_pct: number | null;
+  mae_1h_pct: number | null;
+  horizons: Record<"1h" | "4h" | "24h", { move_pct: number; verdict: FollowupVerdict } | null>;
+}
+export interface OracleFollowupsResponse {
+  items: OracleFollowup[];
+  record: OracleFollowupRecord;
+  record_all_time: OracleFollowupRecord;
+}
+export interface OracleFollowupRecord { days: number | null; n: number; hit_pct: number | null; avg_move_pct: number | null }
 export interface OracleEvent {
   name: string;
   kind: "macro" | "options";
@@ -538,3 +558,136 @@ export const wavewatchApi = {
     http.get<WaveState>(`/wavewatch/${symbol}/state`).then((r) => r.data),
 };
 
+// ---------- DayTrade ----------
+export type DayTradeStatus = "forming" | "waiting" | "triggered" | "missed" | "expired";
+export interface DayTradeSetup {
+  symbol: string;
+  session: string; // "HH:MM@timezone"
+  status: DayTradeStatus;
+  anchor: string;
+  range_end: string;
+  expires: string;
+  last_price: number | null;
+  bars_closed: number;
+  bars_needed: number;
+  range_high?: number;
+  range_low?: number;
+  side?: "LONG" | "SHORT";
+  entry?: number;
+  vol_x?: number;
+  plan_status?: string;
+  skipped: { t: number; side: string; close: number; why: string }[];
+}
+export interface DayTradePlan {
+  id: string;
+  exchange: string;
+  symbol: string;
+  session_at: string;
+  side: "LONG" | "SHORT";
+  status: "open" | "target" | "stop" | "time" | "blocked";
+  entry: number;
+  stop: number;
+  target: number;
+  range_high: number;
+  range_low: number;
+  stop_pct: number;
+  vol_x: number | null;
+  funding_rate: number | null;
+  reasons: string[];
+  ai_verdict: "take" | "skip" | null;
+  ai_reason: string | null;
+  triggered_at: string;
+  exit_by: string;
+  closed_at: string | null;
+  exit_price: number | null;
+  pnl_r: number | null;
+}
+export interface DayTradePlaybook {
+  sessions: string[];
+  range_minutes: number;
+  expire_hours: number;
+  min_volume_x: number;
+  min_net_rr: number;
+  target_r: number;
+  risk_pct: number;
+  max_leverage: number;
+  max_trades_per_session: number;
+  max_trades_per_day: number;
+  daily_loss_limit_r: number;
+  max_consecutive_losses: number;
+  gate_n: number;
+  friction_pct: number;
+  version: string;
+}
+export interface DayTradeDesk {
+  enabled: boolean;
+  ai_enabled: boolean;
+  exchange: string;
+  symbols: string[];
+  account_usd: number;
+  playbook: DayTradePlaybook;
+  board: { at: string; exchange: string; setups: DayTradeSetup[] } | null;
+  gate: { trades: number; loss_r: number; open: number; streak: number; blocked: string[] };
+  plans: DayTradePlan[];
+  stats: {
+    n: number;
+    gate_n: number;
+    wins: number;
+    avg_r: number | null;
+    total_r: number;
+    curve: number[];
+    verdict: "collecting" | "passed" | "failed";
+    bar: number | null;
+    by_ai: Record<"take" | "skip", { n: number; avg_r: number | null }>;
+  };
+  generated_at: string;
+}
+export const daytradeApi = {
+  desk: () => http.get<DayTradeDesk>("/daytrade/desk").then((r) => r.data),
+};
+
+// ---------- XsTrend (weekly paper portfolio) ----------
+// Returns are fractions of capital: 0.01 = 1%.
+export interface XsTrendPosition {
+  symbol: string;
+  weight: number;
+  return: number | null;
+  funding: number | null;
+}
+export interface XsTrendWeek {
+  week_start: string;
+  status: "open" | "settled" | "skipped";
+  positions: XsTrendPosition[];
+  turnover: number | null;
+  gross: number | null;
+  cost: number | null;
+  funding: number | null;
+  net: number | null;
+  mkt: number | null;
+}
+export interface XsTrendPortfolio {
+  enabled: boolean;
+  rules: { version: string; universe: number; per_leg: number; horizons: number[]; cost_pct: number; first_week: string };
+  next_rebalance: string;
+  current: XsTrendWeek | null;
+  weeks: XsTrendWeek[];
+  stats: {
+    n: number;
+    target: number;
+    verdict: "running" | "pass" | "ruled_out" | "inconclusive";
+    mean: number | null;
+    sd: number | null;
+    bar: number | null;
+    low: number | null;
+    high: number | null;
+    total: number;
+    drawdown: number;
+    win_rate: number | null;
+    top5_share: number | null;
+    mkt_total: number;
+  };
+  generated_at: string;
+}
+export const xstrendApi = {
+  portfolio: () => http.get<XsTrendPortfolio>("/xstrend/portfolio").then((r) => r.data),
+};

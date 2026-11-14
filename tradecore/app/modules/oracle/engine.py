@@ -10,7 +10,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import desc, select
+from sqlalchemy import Integer, cast, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -761,6 +761,7 @@ async def measure_outcomes() -> int:
     """
     now = datetime.now(timezone.utc)
     filled = 0
+    followups: list[tuple[OracleSignal, OracleOutcome, str]] = []
     async with AsyncSessionLocal() as db:
         rows = (
             await db.execute(
@@ -776,10 +777,10 @@ async def measure_outcomes() -> int:
                 continue
             changed = False
 
-            async def _maybe(slot: str, min_minutes: int) -> None:
+            async def _maybe(slot: str, min_minutes: int) -> bool:
                 nonlocal changed
                 if getattr(out, slot) is not None or age < timedelta(minutes=min_minutes):
-                    return
+                    return False
                 # Try to find the candle at the exact target time
                 target_time = sig.signal_at + timedelta(minutes=min_minutes)
                 target_ts_ms = int(target_time.timestamp() * 1000)
@@ -794,20 +795,23 @@ async def measure_outcomes() -> int:
                         if latest:
                             candle = latest
                 if candle is None:
-                    return
+                    return False
                 price = redis_service.candle_close(candle)
                 if price <= 0:
-                    return
+                    return False
                 setattr(out, slot, Decimal(str(price)))
                 pct = (price - price_at_signal) / price_at_signal * 100
                 pnl_slot = slot.replace("price_", "pnl_") + "_pct"
                 setattr(out, pnl_slot, Decimal(str(round(pct, 4))))
                 changed = True
+                return True
 
             await _maybe("price_15m", 15)
             await _maybe("price_1h", 60)
-            await _maybe("price_4h", 240)
-            await _maybe("price_24h", 24 * 60)
+            if await _maybe("price_4h", 240) and sig.alerted:
+                followups.append((sig, out, "4h"))
+            if await _maybe("price_24h", 24 * 60) and sig.alerted:
+                followups.append((sig, out, "24h"))
 
             # Correctness checks — require meaningful move, not just > 0
             if out.price_1h is not None and out.was_correct_1h is None:
@@ -851,14 +855,92 @@ async def measure_outcomes() -> int:
 
         if filled:
             await db.commit()
+        if followups:
+            record = await alert_track_record(db, now)
+            for sig, out, horizon in followups:
+                payload = followup_payload(sig, out, horizon, record)
+                if payload:
+                    await redis_service.publish_alert("oracle", payload)
+                    log.info("oracle_followup_published", symbol=sig.symbol, horizon=horizon,
+                             verdict=payload["verdict"], move=payload["move_pct"])
     if filled:
         log.info("oracle_outcomes_updated", filled=filled)
     return filled
+
+
+# ---------- follow-ups: tell the user what happened to an alert ----------
+
+LONG_RECS = ("long", "strong_long", "watch_long")
+SHORT_RECS = ("short", "strong_short", "watch_short")
+FOLLOWUP_RECORD_DAYS = 7
+
+
+def followup_verdict(recommendation: str, pnl_pct: float) -> tuple[str, float, float]:
+    """(verdict, directional move %, noise bar %) for a matured alert.
+
+    Same bar as was_correct_4h, but "wrong" (went against the call) is split
+    from "flat" (moved less than the bar either way) — they teach different
+    lessons, and was_correct lumps both into False.
+    """
+    sign = 1 if recommendation in LONG_RECS else -1 if recommendation in SHORT_RECS else 0
+    bar = 0.5 if "strong" in recommendation else 0.2
+    move = sign * pnl_pct
+    verdict = "right" if move > bar else "wrong" if move < -bar else "flat"
+    return verdict, move, bar
+
+
+def followup_payload(sig: OracleSignal, out: OracleOutcome, horizon: str, record: dict) -> dict | None:
+    pnl = getattr(out, f"pnl_{horizon}_pct")
+    if pnl is None or sig.recommendation not in LONG_RECS + SHORT_RECS:
+        return None
+    verdict, move, bar = followup_verdict(sig.recommendation, float(pnl))
+    long = sig.recommendation in LONG_RECS
+    # MFE/MAE are measured on raw price; re-express as for/against the call.
+    up = float(out.mfe_1h_pct) if out.mfe_1h_pct is not None else None
+    down = float(out.mae_1h_pct) if out.mae_1h_pct is not None else None
+    return {
+        "type": "followup",
+        "id": str(sig.id),
+        "symbol": sig.symbol,
+        "horizon": horizon,
+        "source": "board" if sig.timeframe == "board" else "oracle",
+        "direction": "long" if long else "short",
+        "score": sig.score,
+        "signal_at": sig.signal_at.isoformat(),
+        "price_at_signal": float(out.price_at_signal),
+        "price_now": float(getattr(out, f"price_{horizon}")),
+        "move_pct": round(move, 2),
+        "noise_bar_pct": bar,
+        "verdict": verdict,
+        "best_1h_pct": up if long else down,
+        "worst_1h_pct": down if long else up,
+        "record": record,
+    }
+
+
+async def alert_track_record(db: AsyncSession, now: datetime, days: int | None = FOLLOWUP_RECORD_DAYS) -> dict:
+    """Alerted signals judged at 4h over the last ``days`` (None = all time): n, hit %, avg directional move."""
+    hit = func.avg(cast(OracleOutcome.was_correct_4h, Integer))
+    move = func.avg(func.sign(OracleSignal.score) * OracleOutcome.pnl_4h_pct)
+    r = (await db.execute(
+        select(func.count().label("n"), hit.label("hit"), move.label("move"))
+        .join(OracleOutcome, OracleOutcome.signal_id == OracleSignal.id)
+        .where(OracleSignal.alerted.is_(True), OracleOutcome.was_correct_4h.isnot(None))
+        .where(OracleSignal.signal_at >= now - timedelta(days=days or 36500))
+    )).one()
+    return {
+        "days": days,
+        "n": int(r.n or 0),
+        "hit_pct": round(float(r.hit) * 100) if r.hit is not None else None,
+        "avg_move_pct": round(float(r.move), 2) if r.move is not None else None,
+    }
 
 
 __all__ = [
     "DEFAULT_WEIGHTS",
     "compute_live_score",
     "generate_signal",
+    "followup_payload",
+    "followup_verdict",
     "measure_outcomes",
 ]

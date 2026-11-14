@@ -402,6 +402,9 @@ class TelegramService:
                     f"Chain: `{d.get('chain', '?')}`"
                 )
 
+        if module == "oracle" and t == "followup":
+            return _format_followup(d)
+
         if module == "oracle" and t == "board_entry":
             bull = d.get("direction") == "bullish"
             return (
@@ -582,6 +585,35 @@ class TelegramService:
                 f"_Innovation Zone — wave forming_"
             )
 
+        if module == "daytrade" and t == "plan_closed":
+            icon = {"target": "🎯", "stop": "🛑"}.get(d.get("result"), "⏱")
+            try:
+                r = f"{float(d.get('pnl_r', 0)):+.2f}R"
+            except (TypeError, ValueError):
+                r = "?"
+            return (
+                f"{icon} *DayTrade closed — {sym}* ({d.get('side', '?')})\n"
+                f"Result: `{d.get('result', '?')}` at `{d.get('exit_price', '?')}` | `{r}` (paper)"
+            )
+
+        if module == "daytrade":
+            side = d.get("side", "?")
+            arrow = "🟢" if side == "LONG" else "🔴"
+            ai = ""
+            if d.get("ai_verdict"):
+                # Model text built from news titles: strip Markdown so it can't break or inject into the message.
+                reason = str(d.get("ai_reason") or "").translate(str.maketrans("", "", "*_`[]()"))[:300]
+                verdict = "SKIP" if d["ai_verdict"] == "skip" else "TAKE"
+                ai = f"\nAI: *{verdict}* — {reason}"
+            return (
+                f"{arrow} *DayTrade — {sym} {side}* (range breakout, {d.get('session', '?')} open)\n"
+                f"Entry: `{d.get('entry', '?')}` | Stop: `{d.get('stop', '?')}` | Target: `{d.get('target', '?')}`\n"
+                f"Stop distance: `{d.get('stop_pct', '?')}%` | Volume: `{d.get('vol_x', '?')}×`\n"
+                f"Size on ${d.get('account_usd', '?')}: `{_fmt_usd(d.get('size_usd'))}` at `{d.get('leverage', '?')}×`"
+                f"{ai}\n"
+                f"_Paper plan — unproven playbook. You place the trade._"
+            )
+
         return f"📣 *{module.title()} — {sym}*\n`{t or 'alert'}`"
 
 
@@ -604,6 +636,37 @@ def _fmt_pct(v) -> str:
         return f"{float(v):+.2f}%"
     except (TypeError, ValueError):
         return "?"
+
+
+_FOLLOWUP_LESSON = {
+    "right": "✅ *Right* — it moved {move} in the called direction.",
+    "wrong": "❌ *Wrong* — it went {move} against the call. If you'd entered, the stop was what mattered.",
+    "flat": "➖ *No real move* — {move} is inside the ±{bar}% noise band. Confluence doesn't promise a move, and fees eat a flat trade.",
+}
+
+
+def _format_followup(d: dict) -> str:
+    """What happened N hours after an alert — the lesson, then the base rate."""
+    long = d.get("direction") == "long"
+    lesson = _FOLLOWUP_LESSON.get(d.get("verdict"), "{move}").format(
+        move=_fmt_pct(d.get("move_pct")), bar=d.get("noise_bar_pct", "?"),
+    )
+    lines = [
+        f"📚 *Follow-up {d.get('horizon')} — {d.get('symbol', '?')}* {'🟢 LONG' if long else '🔴 SHORT'} call",
+        f"Price `{d.get('price_at_signal')}` → `{d.get('price_now')}`",
+        lesson,
+    ]
+    best, worst = d.get("best_1h_pct"), d.get("worst_1h_pct")
+    if best is not None and worst is not None:
+        # Shows whether a target or stop would have been hit early, even if the close says otherwise.
+        lines.append(f"First hour: best `+{best:.2f}%` for the call, worst `-{worst:.2f}%` against it")
+    rec = d.get("record") or {}
+    if rec.get("n"):
+        lines.append(
+            f"_Alerts, last {rec.get('days')}d at 4h: {rec.get('hit_pct')}% right, avg {_fmt_pct(rec.get('avg_move_pct'))} "
+            f"(n={rec['n']}{', too few to trust' if rec['n'] < 20 else ''})._"
+        )
+    return "\n".join(lines)
 
 
 def _short_addr(v) -> str:

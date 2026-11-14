@@ -40,7 +40,7 @@ Test login: `test@example.com` / `test1234`.
 
 The backend is organized as **module packages** under `tradecore/app/modules/`. Each module is a self-contained vertical (detector + router + sometimes a model file in `app/models/`):
 
-`radarx`, `whaleradar`, `liquidmap`, `sentimentpulse`, `macropulse`, `riskcalc`, `performance`, `oracle`, `flowpulse`, `newspulse`, `positionmonitor`, `exchanges`, `listingwatch`, `awakening`, `wavewatch`, `walletwatch` (+ `walletwatch/discovery` sub-module for PnL-based wallet auto-discovery), `chainpulse`.
+`radarx`, `whaleradar`, `liquidmap`, `sentimentpulse`, `macropulse`, `riskcalc`, `performance`, `oracle`, `flowpulse`, `newspulse`, `positionmonitor`, `exchanges`, `listingwatch`, `awakening`, `wavewatch`, `walletwatch` (+ `walletwatch/discovery` sub-module for PnL-based wallet auto-discovery), `chainpulse`, `daytrade`, `xstrend`.
 
 Each module typically exposes:
 - `router.py` — FastAPI router, mounted from `app/main.py`
@@ -54,12 +54,15 @@ One-liners for the modules a new contributor is most likely to touch:
 - `wavewatch` — Innovation Zone surveillance with two signals: `wave_incoming` (pre-wave coiling, dwell-gated) and `wave_active` (single-bar cascade/squeeze with funding alignment). Universe spans Bybit Innovation + Binance Innovation/Seed.
 - `listingwatch` — diffs current exchange instrument lists to detect new listings; force-subscribes the bybit stream.
 - `walletwatch` — labeled-address DEX swap monitor across ETH/BSC/Arbitrum/Base/Solana.
+- `daytrade` — opening-range-breakout plans (entry / stop / target / size) on a fixed list of liquid majors, from public 5m klines. Paper-tracked: each plan's outcome is simulated and scored against a pre-committed gate (first 60 closed plans, average net R above a one-sided 90% bound, judged once). A 90-day replay of the current rules averaged −0.215R over 236 trades and failed that gate in every block, so treat it as a paper desk with no demonstrated edge. A later decomposition found no edge before costs either, so the breakout playbook is **retired as a strategy**: it stays as a paper log and plumbing, `DAYTRADE_ENABLED` stays off in production, and it is not to be tuned. An optional Claude verdict (`ANTHROPIC_API_KEY`) is logged per plan but never changes or blocks it. The rules are constants in `daytrade/playbook.py`, deliberately not env-tunable.
+- `xstrend` — weekly paper portfolio: long the 10 strongest and short the 10 weakest of the 30 most-traded Bybit USDT perps, rebuilt Monday 00:00 UTC from public daily bars (hourly idempotent job, catches up missed weeks). Forward test pre-registered in `docs/research/2026-11-13-weekly-xs-trend-forward.md`: 104 weeks from 2026-11-16, judged once. Rules are constants in `xstrend/rules.py`; the file's hash is the record's version, so any edit there restarts the test. `XSTREND_ENABLED`, off by default in production. No orders.
 - `chainpulse` — daily Santiment on-chain macro snapshots (MVRV, NVT, exchange flows, active addresses) per asset, with a derived regime label. No-ops with a log line when `SANTIMENT_API_KEY` is unset.
 
 ### No trading bots
 
 TradeCore has **no trading bot and no order routing**. It is an intelligence
-platform: it detects, scores and alerts, and a human trades.
+platform: it detects, scores and alerts, and a human trades. (`daytrade` stays
+inside that line: it writes paper plans and alerts, and never sends an order.)
 
 Two bots existed and both were removed after failing their pre-committed
 evaluation gates — `bot`/WaveBot (retired 2026-08) and `majorsbot` (removed
@@ -73,6 +76,8 @@ The forward-test record, for anyone tempted to rebuild one:
 | volevent | 58 | −0.0887 avg net R vs a +0.151R backtest | failed its gate |
 | fundingfade | 28 | −0.4142 avg net R | disabled on a percentile tie/cap bug |
 | newsevent | 15 | +0.118% of equity | never reached its n≥30 gate |
+
+Research since (2026-11, `docs/research/`, each pre-registered): intraday range breakouts failed twice and have no edge before costs; Oracle alerts are not a 1h direction call; daily Turtle trend following was inconclusive (underpowered test); weekly cross-sectional trend on Bybit perps passed its backtest (+0.82%/week net over 231 weeks) but leans on a few pumps; its forward record is the `xstrend` paper portfolio. New tests follow `docs/research/README.md`.
 
 **Three strategies, zero survivors.** A separate BTC-only bake-off produced 0
 survivors from 27 variants. If a new bot is proposed, that is the base rate it
@@ -128,6 +133,7 @@ awakening:baseline                    hash {exchange:symbol → median_turnover_
 awakening:hist:{exchange}:{symbol}    list of last 7 daily turnover floats
 listingwatch:known                    set of {exchange}:{market}:{symbol} — diff target
 walletwatch:cursor:{chain}:{addr}     per-chain ingest cursor
+daytrade:board                        JSON string, TTL 600s — live state of every (symbol, session) setup
 ```
 
 Don't change a key shape without grepping for consumers across `app/modules/`.

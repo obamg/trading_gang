@@ -23,14 +23,15 @@ from app.services import redis_service
 from app.services.telegram_service import service as telegram_service
 
 UNREAD_BUFFER_SIZE = 20
-ALERT_MODULES = ("radarx", "whaleradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch")
+ALERT_MODULES = ("radarx", "whaleradar", "oracle", "sentiment", "macro", "newspulse", "liquidmap", "flowpulse", "positionmonitor", "listingwatch", "awakening", "wavewatch", "walletwatch", "daytrade")
 
 # Modules whose alerts bypass the watchlist gate. Oracle is a DISCOVERY
 # signal — "which token, right now" — so scoping it to a watchlist the user
 # has not filled in yet (theirs is empty) would silence it entirely. Its noise
 # is bounded in the engine instead: rarity gate, confluence floor, per-symbol
 # cooldown and a daily cap.
-WATCHLIST_EXEMPT_MODULES: frozenset[str] = frozenset({"oracle"})
+# DayTrade scans its own fixed list of majors, so it is exempt for the same reason.
+WATCHLIST_EXEMPT_MODULES: frozenset[str] = frozenset({"oracle", "daytrade"})
 
 
 class ConnectionManager:

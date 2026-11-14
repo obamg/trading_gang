@@ -47,6 +47,8 @@ from app.modules.listingwatch.router import router as listingwatch_router
 from app.modules.awakening.router import router as awakening_router
 from app.modules.wavewatch.router import router as wavewatch_router
 from app.modules.chainpulse.router import router as chainpulse_router
+from app.modules.daytrade.router import router as daytrade_router
+from app.modules.xstrend.router import router as xstrend_router
 from app.services import redis_service
 from app.services.binance_stream import manager as binance_manager
 from app.services.bybit_stream import manager as bybit_manager
@@ -263,6 +265,8 @@ app.include_router(listingwatch_router)
 app.include_router(awakening_router)
 app.include_router(wavewatch_router)
 app.include_router(chainpulse_router)
+app.include_router(daytrade_router)
+app.include_router(xstrend_router)
 
 
 @app.get("/health")
