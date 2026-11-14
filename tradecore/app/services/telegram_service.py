@@ -408,11 +408,11 @@ class TelegramService:
         if module == "oracle" and t == "board_entry":
             bull = d.get("direction") == "bullish"
             return (
-                f"🔮 *Oracle Board — {sym}*  {'🟢 LONG' if bull else '🔴 SHORT'} direction\n"
+                f"🔮 *Oracle Board — {sym}*  {'🟢 bullish' if bull else '🔴 bearish'} agreement\n"
                 f"Score `{int(d.get('score') or 0):+d}` · `{d.get('agreeing_count', '?')}` modules agree: "
                 f"{', '.join(d.get('agreeing_modules') or [])}\n"
                 f"Price `{d.get('current_price', '-')}`\n"
-                f"_Just joined the Confluence Board — not advice. /pause to mute for an hour._"
+                f"_Just joined the Confluence Board: worth a look, not a trade signal (tested, no edge at 4h). /pause to mute for an hour._"
             )
 
         if module == "oracle":
