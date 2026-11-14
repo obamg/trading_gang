@@ -55,7 +55,7 @@ export default function OraclePage() {
 
       <Tabs
         tabs={[
-          { key: "picks", label: "Top Picks" },
+          { key: "picks", label: "Watchlist" },
           { key: "symbol", label: "Per-Symbol Analysis" },
           { key: "board", label: "Confluence Board" },
           { key: "followup", label: "Alert Follow-up" },
@@ -129,7 +129,7 @@ function TopPicksView({ onOpen }: { onOpen: (symbol: string) => void }) {
       <Card>
         <CardHeader>
           <div className="flex w-full items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">Best setups right now</h2>
+            <h2 className="text-sm font-semibold">Where modules agree right now</h2>
             <LastUpdated date={updated} label="Snapshot" />
           </div>
         </CardHeader>
@@ -139,7 +139,7 @@ function TopPicksView({ onOpen }: { onOpen: (symbol: string) => void }) {
           ) : data?.stale ? (
             <p className="text-sm text-textSecondary">No snapshot yet — the scheduler refreshes every 3 min. Check back shortly.</p>
           ) : (data?.picks ?? []).length === 0 ? (
-            <p className="text-sm text-textSecondary">Nothing has 3+ modules agreeing right now. No trade is a valid answer.</p>
+            <p className="text-sm text-textSecondary">Nothing has 3+ modules agreeing right now.</p>
           ) : (
             data!.picks.map((p, i) => (
               <PickRow key={p.symbol} rank={i + 1} pick={p} onOpen={() => onOpen(p.symbol)} onTrade={() => nav(tradeUrl(p.symbol, p.current_price))} />
@@ -148,6 +148,7 @@ function TopPicksView({ onOpen }: { onOpen: (symbol: string) => void }) {
           <p className="mt-1 text-xs text-textMuted">
             "Like this" = every measured Oracle signal in the same score band (±10) over the last {data?.similar_lookback_days ?? 30} days, judged at 4h.
           </p>
+          <BoardTestNote />
         </CardBody>
       </Card>
     </div>
@@ -191,7 +192,7 @@ function PickRow({ rank, pick, onOpen, onTrade }: { rank: number; pick: OraclePi
         <button type="button" onClick={onOpen} className="font-semibold hover:underline" title="Open per-symbol analysis">
           {pick.symbol}
         </button>
-        <span className={`text-xs font-bold ${long ? "text-profit" : "text-loss"}`}>{long ? "LONG" : "SHORT"}</span>
+        <span className={`text-xs font-bold ${long ? "text-profit" : "text-loss"}`}>{long ? "Bullish" : "Bearish"}</span>
         <span className={`text-sm font-bold tabular-nums ${long ? "text-profit" : "text-loss"}`}>{long ? "+" : ""}{pick.score}</span>
         <div className="flex flex-wrap gap-1">
           {pick.modules.map((m) => (
@@ -399,6 +400,16 @@ function PerSymbolView({ initialSymbol }: { initialSymbol: string }) {
 
 // ---------- confluence board view ----------
 
+/** Result of docs/research/2026-11-14-oracle-confluence-board.md, shown wherever board rows are listed. */
+function BoardTestNote() {
+  return (
+    <p className="mt-2 max-w-[75ch] text-xs text-textSecondary">
+      These are places to look, not trades. Tested on 1,554 past board entries (Sep to Nov 2026): 49.5% moved the
+      agreed way over the next 4 hours and the typical one lost money after costs.
+    </p>
+  );
+}
+
 function ConfluenceBoardView() {
   const [minModules, setMinModules] = useState(3);
   const [minScore, setMinScore] = useState(0);
@@ -462,6 +473,7 @@ function ConfluenceBoardView() {
             Universe: top {data?.universe_size ?? 50} perps by 24h volume. A symbol qualifies when ≥{data?.min_modules ?? 3}{" "}
             modules signal the same direction with intensity {">"} 0.3.
           </p>
+          <BoardTestNote />
         </CardBody>
       </Card>
     </div>
